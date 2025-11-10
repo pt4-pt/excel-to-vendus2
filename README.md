@@ -38,7 +38,11 @@ Sistema web completo em Laravel 11 com TailwindCSS para upload de arquivos Excel
 4. **Configure o arquivo .env:**
    ```env
    VENDUS_API_KEY=sua_chave_api_aqui
-   VENDUS_API_URL=https://www.vendus.pt/ws/v1.1/products
+   VENDUS_API_URL=https://www.vendus.pt/ws/v1.2/products
+   # Opcional: defina uma unidade padrão (recomendado)
+   VENDUS_DEFAULT_UNIT_ID=12345
+   # Opcional: grupo de preços (se aplicável)
+   VENDUS_PRICE_GROUP_ID=
    ```
 
 5. **Compile os assets:**
@@ -64,10 +68,11 @@ O arquivo Excel deve conter as seguintes colunas (na primeira linha):
 | 01489-NTSGB | Camisas | BRIXTON Builders Bowery Perf Flannel | L | 199027005836 | 44.00 | 110.00 |
 
 ### Regras:
-- Cada linha representa uma variação do produto (tamanho)
-- Produtos com a mesma "Ref. Vendus" são agrupados automaticamente
-- Todos os campos são obrigatórios
-- Preços devem ser numéricos
+- Cada linha representa uma variação do produto (tamanho).
+- Produtos com a mesma "Ref. Vendus" são agrupados automaticamente.
+- Campos essenciais: `Ref. Vendus`, `Nome`, `UPC No.`, `PVP`.
+- `unit_id` é resolvido automaticamente (ou defina `VENDUS_DEFAULT_UNIT_ID`).
+- Preços devem ser numéricos.
 
 ## 🔧 Estrutura do Projeto
 
@@ -121,7 +126,9 @@ No arquivo `.env`, configure:
 
 ```env
 VENDUS_API_KEY=sua_chave_api_vendus
-VENDUS_API_URL=https://www.vendus.pt/ws/v1.1/products
+VENDUS_API_URL=https://www.vendus.pt/ws/v1.2/products
+VENDUS_DEFAULT_UNIT_ID=12345
+VENDUS_PRICE_GROUP_ID=
 ```
 
 ## 📋 Exemplo de Payload JSON
@@ -132,26 +139,18 @@ O sistema gera automaticamente o seguinte formato para a API:
 {
   "reference": "01489-NTSGB",
   "title": "BRIXTON Builders Bowery Perf Flannel – NIGHT SAGE/BLACK",
-  "class_name": "Camisas",
-  "supply_price": "44.00",
-  "gross_price": "110.00",
-  "variants": [
-    {
-      "variant": {
-        "title": "Size"
-      },
-      "product_variants": [
-        {
-          "text": "M",
-          "barcode": "199027005829",
-          "code": "01489-NTSGB-M",
-          "price": "110.00"
-        }
-      ]
-    }
-  ]
+  "prices": [
+    { "gross_price": "110.00" }
+  ],
+  "unit_id": 12345,
+  "status": "on"
 }
 ```
+
+Observações:
+- `unit_id` é preenchido automaticamente a partir de `VENDUS_DEFAULT_UNIT_ID` ou pela lista de unidades obtida da API.
+- Para produtos com variações, cada variação é enviada como um produto separado com seu próprio `price`, que é convertido em `prices[]` para v1.2.
+- Campos obsoletos removidos do payload: `stock_type`, `gross_price` (topo) e `supply_price`.
 
 ## 🐛 Troubleshooting
 

@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Http;
 class TestProductsWithVariants extends Command
 {
     protected $signature = 'test:products-with-variants';
-    protected $description = 'Testa se o campo variants funciona no endpoint de produtos da API Vendus';
+    protected $description = 'Explora comportamento do campo variants na API Vendus v1.2';
 
     public function handle()
     {
@@ -32,8 +32,9 @@ class TestProductsWithVariants extends Command
             'reference' => 'TEST_EMPTY_VAR_' . time(),
             'title' => 'Produto Teste - Variants Vazio',
             'description' => 'Teste com campo variants vazio',
-            'supply_price' => 10,
-            'gross_price' => 20,
+            'prices' => [
+                ['gross_price' => '20.00']
+            ],
             'category_id' => 1,
             'brand_id' => 1,
             'status' => 'on',
@@ -65,8 +66,9 @@ class TestProductsWithVariants extends Command
             'reference' => 'TEST_WITH_VAR_' . time(),
             'title' => 'Produto Teste - Com Variants',
             'description' => 'Teste com campo variants preenchido',
-            'supply_price' => 10,
-            'gross_price' => 20,
+            'prices' => [
+                ['gross_price' => '20.00']
+            ],
             'category_id' => 1,
             'brand_id' => 1,
             'status' => 'on',
@@ -75,8 +77,7 @@ class TestProductsWithVariants extends Command
                     'reference' => 'TEST_WITH_VAR_' . time() . '_M',
                     'title' => 'Tamanho M',
                     'barcode' => '123456789012',
-                    'supply_price' => 10,
-                    'gross_price' => 20,
+                    // preços por variante não suportados diretamente em v1.2
                     'attributes' => [
                         'size' => 'M'
                     ]
@@ -85,8 +86,7 @@ class TestProductsWithVariants extends Command
                     'reference' => 'TEST_WITH_VAR_' . time() . '_L',
                     'title' => 'Tamanho L',
                     'barcode' => '123456789013',
-                    'supply_price' => 10,
-                    'gross_price' => 22,
+                    // preços por variante não suportados diretamente em v1.2
                     'attributes' => [
                         'size' => 'L'
                     ]

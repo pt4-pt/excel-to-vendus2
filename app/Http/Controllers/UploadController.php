@@ -36,7 +36,76 @@ class UploadController extends Controller
     public function store(Request $request)
     {
         try {
-            // Validação do arquivo
+            $type = (string) $request->input('import_type', 'products');
+
+            if ($type === 'invoices') {
+                // Validação para Excel de fatura
+                $request->validate([
+                    'excel_file' => 'required|file|mimes:xlsx,xls|max:10240' // 10MB max
+                ]);
+
+                $file = $request->file('excel_file');
+                $data = Excel::toArray([], $file);
+
+                if (empty($data) || empty($data[0])) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Arquivo Excel está vazio ou inválido'
+                    ], 400);
+                }
+
+                $rows = $data[0];
+                $header = array_shift($rows);
+                $headerMap = $this->mapInvoiceHeaders($header);
+
+                if ($headerMap === false) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Cabeçalhos do Excel não correspondem ao formato esperado para faturas. Configure o mapeamento em "Mapeamentos de Faturas".'
+                    ], 400);
+                }
+
+                $groupedInvoices = $this->groupInvoicesByKey($rows, $headerMap);
+                $results = [];
+                $totalInvoices = count($groupedInvoices);
+
+                if ($totalInvoices > 50) {
+                    $results[] = [
+                        'type' => 'warning',
+                        'message' => 'Processamento de muitas faturas (' . $totalInvoices . ') pode demorar alguns minutos'
+                    ];
+                }
+
+                foreach ($groupedInvoices as $key => $invoiceRows) {
+                    $invoiceData = $this->buildInvoiceData($invoiceRows, $headerMap);
+
+                    $apiResult = $this->vendusService->sendInvoice($invoiceData);
+                    if ($apiResult['success'] ?? false) {
+                        $results[] = [
+                            'type' => 'success',
+                            'message' => 'Fatura enviada com sucesso',
+                            'reference' => (string) $key,
+                            'status_code' => $apiResult['status_code'] ?? 200
+                        ];
+                    } else {
+                        $results[] = [
+                            'type' => 'error',
+                            'message' => $apiResult['message'] ?? 'Falha ao enviar fatura',
+                            'reference' => (string) $key,
+                            'status_code' => $apiResult['status_code'] ?? 400
+                        ];
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Processamento de faturas concluído',
+                    'total_invoices' => $totalInvoices,
+                    'results' => $results
+                ]);
+            }
+
+            // Validação do arquivo (Produtos)
             $request->validate([
                 'excel_file' => 'required|file|mimes:xlsx,xls|max:10240' // 10MB max
             ]);
@@ -124,15 +193,19 @@ class UploadController extends Controller
                     $variantProductData = [
                         'reference' => $productData['reference'], // Usa a referencia original
                         'title' => $productData['title'],
-                        'class_name' => $productData['class_name'],
-                        'supply_price' => $productData['supply_price'],
-                        'gross_price' => $variant['price'],
+                        'price' => $variant['price'],
                         'barcode' => $variant['upc_no'], // Adiciona codigo de barras
                         'variants' => []
                     ];
                     
-                    $payload = $this->vendusService->buildProductPayload($variantProductData);
-                    $apiResult = $this->vendusService->sendProduct($payload);
+                    // Pré-validação para mensagens mais claras antes de enviar
+                    $validation = $this->vendusService->validateProductData($variantProductData);
+                    if (!$validation['valid']) {
+                        $errorMessages[] = 'Produto único inválido: ' . implode('; ', $validation['errors']);
+                    } else {
+                        $payload = $this->vendusService->buildProductPayload($variantProductData);
+                        $apiResult = $this->vendusService->sendProduct($payload);
+                    }
                     
                     if ($apiResult['success']) {
                         $successCount = 1;
@@ -145,7 +218,9 @@ class UploadController extends Controller
                         $variantCount++;
                         
                         // Nomenclatura melhorada: [Produto] - Tamanho [X] (Var. Y/Z)
-                        $variantTitle = $productData['title'] . ' - Tamanho ' . $variant['size'];
+                        // Remove tamanho original entre parêntesis do nome base, se existir
+                        $baseTitle = preg_replace('/\s*\([^)]+\)\s*$/', '', $productData['title']);
+                        $variantTitle = $baseTitle . ' - Tamanho ' . $variant['size'];
                         if (count($productData['variants']) > 1) {
                             $variantTitle .= ' (Var. ' . ($index + 1) . '/' . count($productData['variants']) . ')';
                         }
@@ -153,16 +228,21 @@ class UploadController extends Controller
                         $variantProductData = [
                             'reference' => $variant['code'], // Codigo unico da variacao
                             'title' => $variantTitle,
-                            'class_name' => $productData['class_name'],
-                            'supply_price' => $productData['supply_price'],
-                            'gross_price' => $variant['price'],
+                            'price' => $variant['price'],
                             'barcode' => $variant['upc_no'], // Codigo de barras da variacao
                             'description' => "Variacao de tamanho {$variant['size']} do produto {$productData['title']}",
                             'variants' => []
                         ];
                         
-                        $payload = $this->vendusService->buildProductPayload($variantProductData);
-                        $apiResult = $this->vendusService->sendProduct($payload);
+                        // Pré-validação para mensagens mais claras antes de enviar
+                        $validation = $this->vendusService->validateProductData($variantProductData);
+                        if (!$validation['valid']) {
+                            $errorMessages[] = "Variacao {$variant['size']} (#" . ($index + 1) . ") inválida: " . implode('; ', $validation['errors']);
+                            $apiResult = ['success' => false];
+                        } else {
+                            $payload = $this->vendusService->buildProductPayload($variantProductData);
+                            $apiResult = $this->vendusService->sendProduct($payload);
+                        }
                         
                         if ($apiResult['success']) {
                             $successCount++;
@@ -222,6 +302,162 @@ class UploadController extends Controller
     }
 
     /**
+     * Pré-visualiza faturas a partir do Excel
+     */
+    public function previewInvoices(Request $request)
+    {
+        try {
+            $request->validate([
+                'excel_file' => 'required|file|mimes:xlsx,xls|max:10240'
+            ]);
+
+            $file = $request->file('excel_file');
+            $data = Excel::toArray([], $file);
+
+            if (empty($data) || empty($data[0])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Arquivo Excel está vazio ou inválido'
+                ], 400);
+            }
+
+            $rows = $data[0];
+            $header = array_shift($rows);
+            $headerMap = $this->mapInvoiceHeaders($header);
+
+            if ($headerMap === false) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cabeçalhos do Excel não correspondem ao formato esperado para faturas. Configure o mapeamento em "Mapeamentos de Faturas".'
+                ], 400);
+            }
+
+            $grouped = $this->groupInvoicesByKey($rows, $headerMap);
+            $preview = [];
+
+            foreach ($grouped as $key => $invoiceRows) {
+                $first = $invoiceRows[0];
+                $preview[] = [
+                    'key' => (string) $key,
+                    'customer_name' => $this->getCell($first, $headerMap['customer_name'] ?? null),
+                    'customer_nif' => $this->getCell($first, $headerMap['customer_nif'] ?? null),
+                    'series' => $this->getCell($first, $headerMap['series'] ?? null),
+                    'date' => $this->getCell($first, $headerMap['date'] ?? null),
+                    'items_count' => count($invoiceRows),
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'preview' => $preview,
+                'total_invoices' => count($grouped)
+            ]);
+
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao gerar pré-visualização: ' . $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Mapeia cabeçalhos de faturas conforme configurações ativas
+     */
+    private function mapInvoiceHeaders(array $header): array|false
+    {
+        // Usa mapeamentos de DocumentFieldMapping (metadata_key = nome da coluna Excel)
+        $mappings = \App\Models\DocumentFieldMapping::getMappedFields();
+
+        $map = [];
+        $normalizedHeader = array_map(fn($h) => trim(strtolower((string)$h)), $header);
+
+        foreach ($mappings as $m) {
+            $excelCol = trim(strtolower((string)($m->metadata_key ?? '')));
+            if ($excelCol === '') {
+                continue; // sem coluna configurada
+            }
+            $index = array_search($excelCol, $normalizedHeader, true);
+            if ($index !== false) {
+                $map[$m->vendus_field] = $index;
+            }
+        }
+
+        // Valida campos mínimos de itens
+        $requiredItems = ['item_reference','item_title','item_quantity','item_price'];
+        foreach ($requiredItems as $key) {
+            if (!array_key_exists($key, $map)) {
+                return false;
+            }
+        }
+
+        // document_number é opcional para agrupamento; se ausente, agrupamos tudo junto
+        return $map;
+    }
+
+    /**
+     * Agrupa linhas por chave de fatura (document_number) ou tudo junto
+     */
+    private function groupInvoicesByKey(array $rows, array $headerMap): array
+    {
+        $groups = [];
+        $keyIndex = $headerMap['document_number'] ?? null;
+        $defaultKey = 'INV-' . date('Ymd-His');
+
+        foreach ($rows as $row) {
+            $key = $keyIndex !== null ? $this->getCell($row, $keyIndex) : $defaultKey;
+            if ($key === null || $key === '') {
+                $key = $defaultKey;
+            }
+            if (!isset($groups[$key])) {
+                $groups[$key] = [];
+            }
+            $groups[$key][] = $row;
+        }
+        return $groups;
+    }
+
+    /**
+     * Constrói dados de fatura com cabeçalho e itens
+     */
+    private function buildInvoiceData(array $invoiceRows, array $headerMap): array
+    {
+        $first = $invoiceRows[0];
+        $header = [
+            'series' => $this->getCell($first, $headerMap['series'] ?? null),
+            'customer_name' => $this->getCell($first, $headerMap['customer_name'] ?? null) ?: 'Consumidor final',
+            'customer_nif' => $this->getCell($first, $headerMap['customer_nif'] ?? null) ?: null,
+            'date' => $this->getCell($first, $headerMap['date'] ?? null) ?: null,
+            'notes' => $this->getCell($first, $headerMap['notes'] ?? null) ?: null,
+        ];
+
+        $items = [];
+        foreach ($invoiceRows as $row) {
+            $items[] = [
+                'reference' => (string) $this->getCell($row, $headerMap['item_reference']),
+                'title' => (string) $this->getCell($row, $headerMap['item_title']),
+                'quantity' => (float) ($this->getCell($row, $headerMap['item_quantity'])),
+                'gross_price' => (float) ($this->getCell($row, $headerMap['item_price'])),
+                'tax' => $this->getCell($row, $headerMap['item_tax'] ?? null),
+            ];
+        }
+
+        return [
+            'header' => $header,
+            'items' => $items,
+        ];
+    }
+
+    /**
+     * Helper para recuperar célula com segurança
+     */
+    private function getCell(array $row, ?int $index): ?string
+    {
+        if ($index === null) return null;
+        return isset($row[$index]) ? (string) $row[$index] : null;
+    }
+
+    /**
      * Retorna pré-visualização dos produtos do Excel
      *
      * @param Request $request
@@ -263,7 +499,7 @@ class UploadController extends Controller
                 $preview[] = [
                     'reference' => $reference,
                     'name' => $firstRow[$headerMap['nome']] ?? '',
-                    'category' => $firstRow[$headerMap['cat']] ?? '',
+                    'category' => isset($headerMap['cat']) ? ($firstRow[$headerMap['cat']] ?? '') : '',
                     'variants_count' => count($productRows)
                 ];
             }
@@ -290,19 +526,24 @@ class UploadController extends Controller
      */
     private function mapHeaders(array $header): array|false
     {
-        $expectedHeaders = [
+        // v1.2: exige apenas identificadores básicos e preço (PVP). Categoria e custo são opcionais.
+        $requiredHeaders = [
             'ref_vendus' => ['Ref. Vendus', 'ref. vendus', 'ref_vendus'],
-            'cat' => ['Cat', 'cat', 'categoria', 'Categoria'],
             'nome' => ['Nome', 'nome', 'name', 'Name'],
             'size' => ['Size', 'size', 'tamanho', 'Tamanho'],
             'upc_no' => ['UPC No.', 'upc no.', 'upc_no', 'UPC', 'barcode'],
-            'cost' => ['Cost', 'cost', 'custo', 'Custo'],
             'pvp' => ['PVP', 'pvp', 'preço', 'Preço', 'price']
+        ];
+
+        $optionalHeaders = [
+            'cat' => ['Cat', 'cat', 'categoria', 'Categoria'],
+            'cost' => ['Cost', 'cost', 'custo', 'Custo']
         ];
 
         $headerMap = [];
 
-        foreach ($expectedHeaders as $key => $variations) {
+        // Mapear obrigatórios
+        foreach ($requiredHeaders as $key => $variations) {
             $found = false;
             foreach ($header as $index => $headerValue) {
                 if (in_array(trim($headerValue), $variations)) {
@@ -313,6 +554,16 @@ class UploadController extends Controller
             }
             if (!$found) {
                 return false; // Cabeçalho obrigatório não encontrado
+            }
+        }
+
+        // Mapear opcionais, se existirem
+        foreach ($optionalHeaders as $key => $variations) {
+            foreach ($header as $index => $headerValue) {
+                if (in_array(trim($headerValue), $variations)) {
+                    $headerMap[$key] = $index;
+                    break;
+                }
             }
         }
 
@@ -361,9 +612,6 @@ class UploadController extends Controller
         $productData = [
             'reference' => trim($firstRow[$headerMap['ref_vendus']]),
             'title' => trim($firstRow[$headerMap['nome']]),
-            'class_name' => trim($firstRow[$headerMap['cat']]),
-            'supply_price' => $this->parsePrice($firstRow[$headerMap['cost']]),
-            'gross_price' => $this->parsePrice($firstRow[$headerMap['pvp']]),
             'variants' => []
         ];
 

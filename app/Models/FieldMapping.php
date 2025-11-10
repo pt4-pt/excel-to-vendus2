@@ -77,29 +77,39 @@ class FieldMapping extends Model
                 'description' => 'Nome/título do produto que aparecerá na loja'
             ],
             [
-                'vendus_field' => 'supply_price',
-                'vendus_field_label' => 'Preço de Custo',
+                'vendus_field' => 'price',
+                'vendus_field_label' => 'Preço (venda)',
                 'excel_column' => null,
                 'field_type' => 'number',
                 'is_required' => true,
-                'description' => 'Preço de custo/fornecimento do produto'
+                'description' => 'Preço por variação; usado para construir prices[] (API v1.2)'
+            ],
+            [
+                'vendus_field' => 'supply_price',
+                'vendus_field_label' => 'Preço de Custo (obsoleto)',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'is_active' => false,
+                'description' => 'Removido do payload de criação em v1.2'
             ],
             [
                 'vendus_field' => 'gross_price',
-                'vendus_field_label' => 'Preço de Venda',
+                'vendus_field_label' => 'Preço Bruto (obsoleto)',
                 'excel_column' => null,
                 'field_type' => 'number',
-                'is_required' => true,
-                'description' => 'Preço bruto de venda do produto'
+                'is_required' => false,
+                'is_active' => false,
+                'description' => 'Agora deve ser enviado em prices[] na API v1.2'
             ],
             [
                 'vendus_field' => 'unit_id',
                 'vendus_field_label' => 'Unidade',
                 'excel_column' => null,
                 'field_type' => 'number',
-                'is_required' => true,
-                'default_value' => '1',
-                'description' => 'ID da unidade de medida (1 = peça/unidade)'
+                'is_required' => false,
+                'default_value' => null,
+                'description' => 'ID da unidade de medida. Será resolvido automaticamente se não configurado.'
             ],
             [
                 'vendus_field' => 'status',
@@ -206,8 +216,9 @@ class FieldMapping extends Model
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'default_value' => '1',
-                'description' => 'Tipo de controle de estoque (0 = sem controle, 1 = com controle)'
+                'is_active' => false,
+                'default_value' => null,
+                'description' => 'Obsoleto em v1.2: campo não permitido pela API'
             ],
             [
                 'vendus_field' => 'stock_type',
@@ -215,34 +226,46 @@ class FieldMapping extends Model
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'default_value' => 'M',
-                'description' => 'Tipo de estoque (M = Manual, A = Automático)'
+                'is_active' => false,
+                'default_value' => null,
+                'description' => 'Obsoleto em v1.2: campo não permitido pela API'
             ],
             
             // Campos fiscais
             [
-                'vendus_field' => 'tax_id',
+                'vendus_field' => 'tax',
                 'vendus_field_label' => 'Taxa',
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'description' => 'ID da taxa aplicável ao produto'
+                'description' => 'Taxa aplicável ao produto (ID ou código)'
+            ],
+            [
+                'vendus_field' => 'tax_id',
+                'vendus_field_label' => 'Taxa (obsoleto)',
+                'excel_column' => null,
+                'field_type' => 'string',
+                'is_required' => false,
+                'is_active' => false,
+                'description' => 'Obsoleto em v1.2: use "tax"'
             ],
             [
                 'vendus_field' => 'tax_exemption',
-                'vendus_field_label' => 'Isenção Fiscal',
+                'vendus_field_label' => 'Isenção Fiscal (obsoleto)',
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'description' => 'Código de isenção fiscal'
+                'is_active' => false,
+                'description' => 'Obsoleto em v1.2'
             ],
             [
                 'vendus_field' => 'tax_exemption_law',
-                'vendus_field_label' => 'Lei de Isenção',
+                'vendus_field_label' => 'Lei de Isenção (obsoleto)',
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'description' => 'Lei que fundamenta a isenção fiscal'
+                'is_active' => false,
+                'description' => 'Obsoleto em v1.2'
             ],
             
             // Campo de imagem

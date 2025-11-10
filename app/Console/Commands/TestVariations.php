@@ -20,23 +20,24 @@ class TestVariations extends Command
      *
      * @var string
      */
-    protected $description = 'Testa se a API Vendus aceita produtos com variações';
+    protected $description = 'Testa comportamento da API Vendus v1.2 com variações (esperado: não suportado)';
 
     /**
      * Execute the console command.
      */
     public function handle()
     {
-        $this->info('Testando se a API Vendus suporta variações...');
+        $this->info('Testando comportamento de variações na API Vendus v1.2...');
         
         // Produto de teste com variações
         $testProductWithVariants = [
             'reference' => 'TEST-VARIANTS-' . time(),
             'title' => 'Produto Teste com Variações',
-            'supply_price' => 10.00,
-            'gross_price' => 20.00,
             'unit_id' => 292626421,
             'status' => 'on',
+            'prices' => [
+                ['gross_price' => '20.00']
+            ],
             'variants' => [
                 [
                     'variant' => [
@@ -94,15 +95,16 @@ class TestVariations extends Command
                 
                 // Agora testa sem variações para comparar
                 $this->line('');
-                $this->info('Testando o mesmo produto SEM variações...');
+                $this->info('Testando o mesmo produto SEM variações (v1.2)...');
                 
                 $testProductWithoutVariants = [
                     'reference' => 'TEST-NO-VARIANTS-' . time(),
                     'title' => 'Produto Teste sem Variações',
-                    'supply_price' => 10.00,
-                    'gross_price' => 20.00,
                     'unit_id' => 292626421,
-                    'status' => 'on'
+                    'status' => 'on',
+                    'prices' => [
+                        ['gross_price' => '20.00']
+                    ]
                 ];
                 
                 $response2 = Http::withToken($apiKey)

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Upload de Produtos - Vendus Integration</title>
+    <title>Upload - Vendus Integration</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -13,18 +13,18 @@
         <div class="text-center mb-8">
             <img src="{{ asset('images/logo.svg') }}" alt="Logo Vendus Integration" class="w-16 h-16 mx-auto mb-4">
             <h1 class="text-4xl font-bold text-gray-900 mb-2">
-                Upload de Produtos
+                Importar para Vendus
             </h1>
-            <p class="text-lg text-gray-600">Upload de produtos via arquivo Excel</p>
+            <p class="text-lg text-gray-600">Importe Produtos (Excel) ou Faturas (Excel)</p>
             
             <!-- Link para Mapeamento -->
             <div class="mt-4">
-                <a href="{{ route('field-mappings.index') }}" class="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors duration-200">
+                <a id="mappingLink" href="{{ route('field-mappings.index') }}" data-products-url="{{ route('field-mappings.index') }}" data-invoices-url="{{ route('document-mappings.index') }}" class="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors duration-200">
                     <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                     </svg>
-                    Configurar Mapeamento de Campos
+                    <span id="mappingLinkText">Configurar Mapeamento de Campos</span>
                 </a>
             </div>
         </div>
@@ -33,10 +33,24 @@
         <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
             <!-- Upload Section -->
             <div class="p-6 border-b border-gray-200">
-                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upload do Arquivo Excel</h2>
+                <h2 id="uploadHeader" class="text-2xl font-semibold text-gray-800 mb-4">Upload do Arquivo Excel</h2>
                 
                 <form id="uploadForm" enctype="multipart/form-data" class="space-y-4">
                     @csrf
+                    <!-- Tipo de Importação -->
+                    <div class="mb-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de importação</label>
+                        <div class="flex items-center space-x-6">
+                            <label class="inline-flex items-center">
+                                <input type="radio" name="import_type" value="products" class="form-radio text-blue-600" checked>
+                                <span class="ml-2 text-gray-800">Produtos</span>
+                            </label>
+                            <label class="inline-flex items-center">
+                                <input type="radio" name="import_type" value="invoices" class="form-radio text-blue-600">
+                                <span class="ml-2 text-gray-800">Faturas</span>
+                            </label>
+                        </div>
+                    </div>
                     <div class="flex items-center justify-center w-full">
                         <label for="excel_file" class="flex flex-col items-center justify-center w-full h-64 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors duration-200">
                             <div class="flex flex-col items-center justify-center pt-5 pb-6" id="dropZone">
@@ -46,7 +60,7 @@
                                 <p class="mb-2 text-sm text-gray-500">
                                     <span class="font-semibold">Clique para fazer upload</span> ou arraste o arquivo aqui
                                 </p>
-                                <p class="text-xs text-gray-500">Apenas arquivos Excel (.xlsx, .xls) até 10MB</p>
+                                <p id="fileHint" class="text-xs text-gray-500">Apenas arquivos Excel (.xlsx, .xls) até 10MB</p>
                             </div>
                             <input id="excel_file" name="excel_file" type="file" class="hidden" accept=".xlsx,.xls" />
                         </label>
@@ -72,7 +86,7 @@
                             <svg class="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l2 2 4-4"></path>
                             </svg>
-                            Enviar Produtos
+                            <span id="submitLabel">Enviar Produtos</span>
                         </button>
                     </div>
                 </form>
@@ -81,7 +95,7 @@
             <!-- Progress Bar -->
             <div id="progressSection" class="hidden p-6 border-b border-gray-200 bg-gray-50">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-sm font-medium text-gray-700">Processando produtos...</span>
+                    <span id="progressLabel" class="text-sm font-medium text-gray-700">Processando produtos...</span>
                     <span id="progressText" class="text-sm text-gray-500">0%</span>
                 </div>
                 <div class="w-full bg-gray-200 rounded-full h-2">
@@ -100,7 +114,7 @@
                 <h3 class="text-xl font-semibold text-gray-800 mb-4">Resultado do Processamento</h3>
                 <div id="resultsContent"></div>
             </div>
-        </div>-
+        </div>
     </div>
 
     <script>
@@ -112,13 +126,63 @@
             const fileSize = document.getElementById('fileSize');
             const previewBtn = document.getElementById('previewBtn');
             const submitBtn = document.getElementById('submitBtn');
+            const submitLabel = document.getElementById('submitLabel');
             const progressSection = document.getElementById('progressSection');
             const progressBar = document.getElementById('progressBar');
             const progressText = document.getElementById('progressText');
+            const progressLabel = document.getElementById('progressLabel');
             const previewSection = document.getElementById('previewSection');
             const previewContent = document.getElementById('previewContent');
             const resultsSection = document.getElementById('resultsSection');
             const resultsContent = document.getElementById('resultsContent');
+            const fileHint = document.getElementById('fileHint');
+            const uploadHeader = document.getElementById('uploadHeader');
+            const importTypeInputs = document.querySelectorAll('input[name="import_type"]');
+            const mappingLink = document.getElementById('mappingLink');
+            const mappingLinkText = document.getElementById('mappingLinkText');
+
+            function getImportType() {
+                const sel = Array.from(importTypeInputs).find(i => i.checked);
+                return sel ? sel.value : 'products';
+            }
+
+            function updateMode() {
+                const type = getImportType();
+                if (type === 'products') {
+                    fileInput.accept = '.xlsx,.xls';
+                    fileHint.textContent = 'Apenas arquivos Excel (.xlsx, .xls) até 10MB';
+                    uploadHeader.textContent = 'Upload do Arquivo Excel';
+                    previewBtn.disabled = !(fileInput.files && fileInput.files[0]);
+                    previewBtn.textContent = 'Pré-visualizar Produtos';
+                    submitLabel.textContent = 'Enviar Produtos';
+                    progressLabel.textContent = 'Processando produtos...';
+                    // Link de mapeamento para produtos
+                    if (mappingLink) {
+                        mappingLink.href = mappingLink.dataset.productsUrl;
+                    }
+                    if (mappingLinkText) {
+                        mappingLinkText.textContent = 'Configurar Mapeamento de Produtos';
+                    }
+                } else {
+                    fileInput.accept = '.xlsx,.xls';
+                    fileHint.textContent = 'Apenas arquivos Excel (.xlsx, .xls) até 10MB';
+                    uploadHeader.textContent = 'Upload do Arquivo Excel';
+                    previewBtn.disabled = !(fileInput.files && fileInput.files[0]);
+                    previewBtn.textContent = 'Pré-visualizar Faturas';
+                    submitLabel.textContent = 'Enviar Faturas';
+                    progressLabel.textContent = 'Processando faturas...';
+                    // Link de mapeamento para faturas
+                    if (mappingLink) {
+                        mappingLink.href = mappingLink.dataset.invoicesUrl;
+                    }
+                    if (mappingLinkText) {
+                        mappingLinkText.textContent = 'Configurar Mapeamento de Faturas';
+                    }
+                }
+            }
+
+            importTypeInputs.forEach(i => i.addEventListener('change', updateMode));
+            updateMode();
 
             // File input change handler
             fileInput.addEventListener('change', function(e) {
@@ -160,20 +224,27 @@
                 }
             });
 
-            // Preview button handler
+            // Preview button handler (produtos e faturas)
             previewBtn.addEventListener('click', function() {
+                const type = getImportType();
                 const formData = new FormData();
                 formData.append('excel_file', fileInput.files[0]);
                 formData.append('_token', document.querySelector('meta[name="csrf-token"]').getAttribute('content'));
 
-                fetch('/upload/preview', {
+                const url = type === 'products' ? '/upload/preview' : '/upload/preview-invoices';
+
+                fetch(url, {
                     method: 'POST',
                     body: formData
                 })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        showPreview(data.preview, data.total_products);
+                        if (type === 'products') {
+                            showProductPreview(data.preview, data.total_products);
+                        } else {
+                            showInvoicePreview(data.preview, data.total_invoices);
+                        }
                     } else {
                         showAlert(data.message, 'error');
                     }
@@ -188,6 +259,8 @@
                 e.preventDefault();
                 
                 const formData = new FormData(form);
+                // Assegura que o tipo de importação é enviado
+                formData.set('import_type', getImportType());
                 
                 // Show progress
                 progressSection.classList.remove('hidden');
@@ -228,7 +301,7 @@
                 progressText.textContent = Math.round(percent) + '%';
             }
 
-            function showPreview(preview, totalProducts) {
+            function showProductPreview(preview, totalProducts) {
                 let html = `
                     <div class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                         <p class="text-blue-800 font-medium">Total de produtos encontrados: ${totalProducts}</p>
@@ -267,16 +340,69 @@
                 previewSection.classList.remove('hidden');
             }
 
+            function showInvoicePreview(preview, totalInvoices) {
+                let html = `
+                    <div class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p class="text-blue-800 font-medium">Total de faturas encontradas: ${totalInvoices}</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full table-auto border-collapse border border-gray-300">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Chave</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Cliente</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">NIF</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Série</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Data</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Itens</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                preview.forEach((inv, index) => {
+                    html += `
+                        <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
+                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">${inv.key}</td>
+                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">${inv.customer_name || ''}</td>
+                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">${inv.customer_nif || ''}</td>
+                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">${inv.series || ''}</td>
+                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">${inv.date || ''}</td>
+                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">${inv.items_count}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+
+                previewContent.innerHTML = html;
+                previewSection.classList.remove('hidden');
+            }
+
             function showResults(data) {
                 let html = '';
 
                 if (data.success) {
-                    html += `
-                        <div class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                            <p class="text-green-800 font-medium">${data.message}</p>
-                            <p class="text-green-700 text-sm">Total de produtos processados: ${data.total_products}</p>
-                        </div>
-                    `;
+                    if (data.document_id || (data.document && data.document.id)) {
+                        const docId = data.document_id || (data.document ? data.document.id : '');
+                        html += `
+                            <div class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                <p class="text-green-800 font-medium">${data.message || 'Fatura enviada com sucesso'}</p>
+                                ${docId ? `<p class="text-green-700 text-sm">ID do documento: ${docId}</p>` : ''}
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                <p class="text-green-800 font-medium">${data.message}</p>
+                                ${typeof data.total_products !== 'undefined' ? `<p class="text-green-700 text-sm">Total de produtos processados: ${data.total_products}</p>` : ''}
+                            </div>
+                        `;
+                    }
 
                     if (data.results && data.results.length > 0) {
                         html += '<div class="space-y-2">';

@@ -2,7 +2,7 @@
 
 ## Variações de Produtos
 
-Após uma investigação completa da API Vendus v1.1, foram identificadas as seguintes limitações em relação ao suporte para variações de produtos:
+Após uma investigação completa da API Vendus v1.2, foram identificadas as seguintes limitações em relação ao suporte para variações de produtos:
 
 ### Limitações Confirmadas
 
@@ -13,13 +13,15 @@ Após uma investigação completa da API Vendus v1.1, foram identificadas as seg
    - Tentativas de enviar produtos com o campo `variants` resultam em erro 403
    - Mensagem de erro: "O campo variants não é permitido"
 
-3. **Campos permitidos na API de produtos**
+3. **Campos aceitos pelo endpoint de produtos (observados via erros da API)**
    ```
-   reference, barcode, supplier_code, title, description, include_description, 
-   supply_price, gross_price, prices, unit_id, type_id, class_id, lot_control, 
-   stock_control, stock_type, tax_id, tax_exemption, tax_exemption_law, 
-   category_id, brand_id, image, status
+   reference, barcode, supplier_code, title, description, include_description,
+   unit_id, type_id, variant_id, class_id, prices, stock, tax, lot_control,
+   category_id, brand_id, image, status, stores
    ```
+   Observações:
+   - `stock_type` não é permitido em v1.2 (removido do payload)
+   - `gross_price` e `supply_price` não são aceitos como campos de topo; o preço deve ser enviado em `prices[]`
 
 ### Solução Implementada
 
@@ -53,7 +55,7 @@ Devido a estas limitações, o sistema atual implementa a seguinte solução:
 
 ## Conclusão
 
-A API Vendus v1.1 **não suporta nativamente o conceito de variações de produtos**. A solução atual, que envia cada variação como um produto separado com nomenclatura padronizada, é a abordagem mais eficiente possível dentro das limitações da API.
+A API Vendus v1.2 **não suporta nativamente o conceito de variações de produtos**. A solução atual, que envia cada variação como um produto separado com nomenclatura padronizada, é a abordagem mais eficiente possível dentro das limitações da API.
 
 ---
 

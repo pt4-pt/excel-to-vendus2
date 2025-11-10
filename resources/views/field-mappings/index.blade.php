@@ -370,6 +370,25 @@
                 </form>
             </div>
 
+            <!-- Guia rápida e utilitários -->
+            <div style="background:#e9f7ef;border:1px solid #c3e6cb;color:#155724;border-radius:8px;padding:16px;margin-bottom:24px;">
+                <div style="font-weight:600;margin-bottom:8px;">Dicas importantes para v1.2 da API Vendus</div>
+                <ul style="margin-left:18px;">
+                    <li>Obrigatórios: mapeie pelo menos `reference` e `title`.</li>
+                    <li>Preço: para produtos com variações, informe `price` por variação (será enviado em `prices[]`).</li>
+                    <li>Unidade (`unit_id`): se não mapear, eu resolvo automaticamente ou use `VENDUS_DEFAULT_UNIT_ID` no `.env`.</li>
+                    <li>Campos removidos: `stock_type`, `gross_price` (topo) e `supply_price` não são enviados.</li>
+                    <li>Impostos: use `tax` (ID ou código). `tax_id` e isenções estão como obsoletos.</li>
+                </ul>
+                <div style="margin-top:12px;">
+                    <button id="btn-fetch-units" class="btn btn-secondary">Buscar Unidades da Vendus</button>
+                </div>
+                <div id="units-list" style="margin-top:12px;display:none;background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:12px;">
+                    <div style="font-weight:600;margin-bottom:8px;">Unidades encontradas</div>
+                    <div id="units-content" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;"></div>
+                </div>
+            </div>
+
             <form method="POST" action="{{ route('field-mappings.store') }}">
                 @csrf
                 
@@ -392,6 +411,9 @@
                                 <td>
                                     <input type="hidden" name="mappings[{{ $index }}][vendus_field]" value="{{ $mapping->vendus_field }}">
                                     <strong>{{ $mapping->vendus_field_label ?? $mapping->vendus_field }}</strong>
+                                    @if($mapping->vendus_field === 'unit_id')
+                                        <span class="badge badge-secondary" title="Se não mapear, será resolvido automaticamente.">Auto</span>
+                                    @endif
                                     <br><small class="text-muted">{{ $mapping->vendus_field }}</small>
                                 </td>
                                 <td>
@@ -471,6 +493,9 @@
             const fileInput = document.getElementById('example-file');
             const fileName = document.getElementById('file-name');
             const uploadStatus = document.getElementById('upload-status');
+            const btnFetchUnits = document.getElementById('btn-fetch-units');
+            const unitsList = document.getElementById('units-list');
+            const unitsContent = document.getElementById('units-content');
 
             fileInput.addEventListener('change', function() {
                 const file = this.files[0];
@@ -482,6 +507,41 @@
                     uploadExampleFile(file);
                 }
             });
+
+            // Buscar unidades da Vendus
+            if (btnFetchUnits) {
+                btnFetchUnits.addEventListener('click', function() {
+                    unitsContent.innerHTML = '<div style="color:#007bff;">🔎 Buscando unidades...</div>';
+                    unitsList.style.display = 'block';
+                    fetch('{{ route("units.api") }}')
+                      .then(resp => resp.json())
+                      .then(data => {
+                        if (data.success && data.units && data.units.length) {
+                            unitsContent.innerHTML = '';
+                            data.units.forEach(u => {
+                                const div = document.createElement('div');
+                                div.style.border = '#e9ecef 1px solid';
+                                div.style.borderRadius = '6px';
+                                div.style.padding = '8px';
+                                div.innerHTML = `<div><strong>ID:</strong> ${u.id}</div><div><strong>Nome:</strong> ${u.name || '-'} </div>`;
+                                const btnUse = document.createElement('button');
+                                btnUse.textContent = 'Usar este ID';
+                                btnUse.className = 'btn btn-success';
+                                btnUse.style.marginTop = '8px';
+                                btnUse.onclick = () => setUnitDefaultValue(u.id);
+                                div.appendChild(btnUse);
+                                unitsContent.appendChild(div);
+                            });
+                        } else {
+                            unitsContent.innerHTML = '<div style="color:#dc3545;">Não foi possível identificar unidades. Verifique se sua conta possui unidades configuradas.</div>';
+                        }
+                      })
+                      .catch(err => {
+                        console.error(err);
+                        unitsContent.innerHTML = '<div style="color:#dc3545;">Erro ao buscar unidades.</div>';
+                      });
+                });
+            }
 
             // Funcionalidade para destacar campos obrigatórios sem mapeamento
             updateRequiredFieldsHighlight();
@@ -561,6 +621,24 @@
                 } else {
                     row.style.backgroundColor = '';
                     row.style.border = '';
+                }
+            });
+        }
+
+        function setUnitDefaultValue(unitId) {
+            // Encontra a linha do unit_id e define o valor padrão
+            const rows = document.querySelectorAll('#mappings-tbody tr');
+            rows.forEach(row => {
+                const hidden = row.querySelector('input[type="hidden"][name*="[vendus_field]"]');
+                if (hidden && hidden.value === 'unit_id') {
+                    const inputDefault = row.querySelector('input[name*="[default_value]"]');
+                    const fieldTypeSelect = row.querySelector('select[name*="[field_type]"]');
+                    if (inputDefault) {
+                        inputDefault.value = unitId;
+                    }
+                    if (fieldTypeSelect) {
+                        fieldTypeSelect.value = 'number';
+                    }
                 }
             });
         }
