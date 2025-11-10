@@ -325,32 +325,32 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔗 Mapeamento de Campos</h1>
+            <h1>Mapeamento de Campos</h1>
             <p>Configure quais colunas do Excel correspondem aos campos obrigatórios do Vendus</p>
         </div>
 
         <div class="content">
             @if(session('success'))
                 <div class="alert alert-success">
-                    ✅ {{ session('success') }}
+                    {{ session('success') }}
                 </div>
             @endif
 
             @if(session('error'))
                 <div class="alert alert-error">
-                    ❌ {{ session('error') }}
+                    {{ session('error') }}
                 </div>
             @endif
 
             <!-- Seção de Upload de Exemplo -->
             <div class="upload-section">
-                <h3>📊 Upload de Excel de Exemplo</h3>
+                <h3>Upload de Excel de Exemplo</h3>
                 <p>Faça upload de um arquivo Excel de exemplo para extrair automaticamente as colunas disponíveis</p>
                 
                 <div class="file-input-wrapper">
                     <input type="file" id="example-file" class="file-input" accept=".xlsx,.xls,.csv">
                     <label for="example-file" class="file-input-label">
-                        📁 Escolher Arquivo Excel
+                        Escolher Arquivo Excel
                     </label>
                 </div>
                 
@@ -360,12 +360,12 @@
 
             <div class="actions">
                 <a href="{{ route('upload') }}" class="btn btn-secondary">
-                    ⬅️ Voltar ao Upload
+                    Voltar ao Upload
                 </a>
                 <form method="POST" action="{{ route('field-mappings.reset') }}" style="display: inline;">
                     @csrf
                     <button type="submit" class="btn btn-warning" onclick="return confirm('Tem certeza que deseja restaurar os mapeamentos padrão?')">
-                        🔄 Restaurar Padrão
+                        Restaurar Padrão
                     </button>
                 </form>
             </div>
@@ -450,14 +450,14 @@
 
                 <div class="actions">
                     <button type="submit" class="btn btn-success">
-                        💾 Salvar Mapeamentos
+                        Salvar Mapeamentos
                     </button>
                 </div>
             </form>
 
             <div class="navigation">
                 <a href="{{ route('upload') }}" class="btn btn-primary">
-                    🚀 Ir para Upload de Produtos
+                    Ir para Upload de Produtos
                 </a>
             </div>
         </div>
@@ -506,14 +506,14 @@
                 if (data.success) {
                     availableColumns = data.columns;
                     updateColumnDropdowns();
-                    uploadStatus.innerHTML = `<div style="color: #28a745;">✅ ${data.message} (${data.columns.length} colunas encontradas)</div>`;
+                    uploadStatus.innerHTML = `<div style="color: #28a745;">${data.message} (${data.columns.length} colunas encontradas)</div>`;
                 } else {
-                    uploadStatus.innerHTML = `<div style="color: #dc3545;">❌ ${data.message}</div>`;
+                    uploadStatus.innerHTML = `<div style="color: #dc3545;">${data.message}</div>`;
                 }
             })
             .catch(error => {
                 console.error('Erro:', error);
-                uploadStatus.innerHTML = '<div style="color: #dc3545;">❌ Erro ao processar arquivo</div>';
+                uploadStatus.innerHTML = '<div style="color: #dc3545;">Erro ao processar arquivo</div>';
             });
         }
 

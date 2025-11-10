@@ -11,7 +11,10 @@
     <div class="container mx-auto px-4 py-8">
         <!-- Header -->
         <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-900 mb-2">Vendus Integration</h1>
+            <img src="{{ asset('images/logo.svg') }}" alt="Logo Vendus Integration" class="w-16 h-16 mx-auto mb-4">
+            <h1 class="text-4xl font-bold text-gray-900 mb-2">
+                Upload de Produtos
+            </h1>
             <p class="text-lg text-gray-600">Upload de produtos via arquivo Excel</p>
             
             <!-- Link para Mapeamento -->
@@ -21,7 +24,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                     </svg>
-                    🔗 Configurar Mapeamento de Campos
+                    Configurar Mapeamento de Campos
                 </a>
             </div>
         </div>
@@ -30,7 +33,7 @@
         <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
             <!-- Upload Section -->
             <div class="p-6 border-b border-gray-200">
-                <h2 class="text-2xl font-semibold text-gray-800 mb-4">📁 Upload do Arquivo Excel</h2>
+                <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upload do Arquivo Excel</h2>
                 
                 <form id="uploadForm" enctype="multipart/form-data" class="space-y-4">
                     @csrf
@@ -63,10 +66,6 @@
                     <!-- Action Buttons -->
                     <div class="flex space-x-4">
                         <button type="button" id="previewBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                            <svg class="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                            </svg>
                             Pré-visualizar Produtos
                         </button>
                         <button type="submit" id="submitBtn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
@@ -92,59 +91,16 @@
 
             <!-- Preview Section -->
             <div id="previewSection" class="hidden p-6 border-b border-gray-200">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4">👁️ Pré-visualização dos Produtos</h3>
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Pré-visualização dos Produtos</h3>
                 <div id="previewContent"></div>
             </div>
 
             <!-- Results Section -->
             <div id="resultsSection" class="hidden p-6">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4">📊 Resultado do Processamento</h3>
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Resultado do Processamento</h3>
                 <div id="resultsContent"></div>
             </div>
-        </div>
-
-        <!-- Format Info -->
-        <div class="max-w-4xl mx-auto mt-8 bg-white rounded-lg shadow-lg p-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">📋 Formato Esperado do Excel</h3>
-            <div class="overflow-x-auto">
-                <table class="min-w-full table-auto border-collapse border border-gray-300">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Ref. Vendus</th>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Cat</th>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Nome</th>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Size</th>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">UPC No.</th>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">Cost</th>
-                            <th class="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-700">PVP</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr class="bg-white">
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">01489-NTSGB</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">Camisas</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">BRIXTON Builders Bowery Perf Flannel</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">M</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">199027005829</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">44.00</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">110.00</td>
-                        </tr>
-                        <tr class="bg-gray-50">
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">01489-NTSGB</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">Camisas</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">BRIXTON Builders Bowery Perf Flannel</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">L</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">199027005836</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">44.00</td>
-                            <td class="border border-gray-300 px-4 py-2 text-sm text-gray-600">110.00</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <p class="text-sm text-gray-600 mt-4">
-                <strong>Nota:</strong> Cada linha representa uma variação do produto (tamanho). Produtos com a mesma "Ref. Vendus" serão agrupados automaticamente.
-            </p>
-        </div>
+        </div>-
     </div>
 
     <script>
@@ -317,7 +273,7 @@
                 if (data.success) {
                     html += `
                         <div class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                            <p class="text-green-800 font-medium">✅ ${data.message}</p>
+                            <p class="text-green-800 font-medium">${data.message}</p>
                             <p class="text-green-700 text-sm">Total de produtos processados: ${data.total_products}</p>
                         </div>
                     `;
@@ -326,39 +282,33 @@
                         html += '<div class="space-y-2">';
                         
                         data.results.forEach(result => {
-                            let bgColor, textColor, icon;
+                            let bgColor, textColor;
                             
                             switch(result.type) {
                                 case 'success':
                                     bgColor = 'bg-green-50 border-green-200';
                                     textColor = 'text-green-800';
-                                    icon = '✅';
                                     break;
                                 case 'error':
                                     bgColor = 'bg-red-50 border-red-200';
                                     textColor = 'text-red-800';
-                                    icon = '❌';
                                     break;
                                 case 'warning':
                                     bgColor = 'bg-yellow-50 border-yellow-200';
                                     textColor = 'text-yellow-800';
-                                    icon = '⚠️';
                                     break;
                                 case 'skipped':
                                     bgColor = 'bg-gray-50 border-gray-200';
                                     textColor = 'text-gray-800';
-                                    icon = '⏭️';
                                     break;
                                 default:
                                     bgColor = 'bg-blue-50 border-blue-200';
                                     textColor = 'text-blue-800';
-                                    icon = 'ℹ️';
                             }
 
                             html += `
                                 <div class="p-3 ${bgColor} border rounded-lg">
                                     <div class="flex items-start">
-                                        <span class="mr-2">${icon}</span>
                                         <div class="flex-1">
                                             <p class="${textColor} font-medium">
                                                 ${result.reference ? `${result.reference}: ` : ''}${result.message}
@@ -376,7 +326,7 @@
                 } else {
                     html += `
                         <div class="p-4 bg-red-50 border border-red-200 rounded-lg">
-                            <p class="text-red-800 font-medium">❌ ${data.message}</p>
+                            <p class="text-red-800 font-medium">${data.message}</p>
                         </div>
                     `;
                 }

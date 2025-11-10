@@ -4,12 +4,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\FieldMappingController;
 
-Route::get('/', function () {
-    return view('welcome');
-});
-
 // Rotas para upload de produtos
-Route::get('/upload', [UploadController::class, 'index'])->name('upload');
+Route::get('/', [UploadController::class, 'index'])->name('upload');
 Route::post('/upload', [UploadController::class, 'store'])->name('upload.store');
 Route::post('/upload/preview', [UploadController::class, 'preview'])->name('upload.preview');
 

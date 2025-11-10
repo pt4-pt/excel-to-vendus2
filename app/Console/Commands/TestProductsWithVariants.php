@@ -50,9 +50,9 @@ class TestProductsWithVariants extends Command
         $this->line('Status HTTP: ' . $response->status());
         
         if ($response->successful()) {
-            $this->line('✅ Sucesso! Produto criado com ID: ' . $response->json('id'));
+            $this->line('Sucesso! Produto criado com ID: ' . $response->json('id'));
         } else {
-            $this->line('⚠️ Falha - codigo ' . $response->status());
+            $this->line('Falha - codigo ' . $response->status());
             $this->line('Resposta: ' . $response->body());
         }
         
@@ -104,16 +104,16 @@ class TestProductsWithVariants extends Command
         $this->line('Status HTTP: ' . $response->status());
         
         if ($response->successful()) {
-            $this->line('✅ Sucesso! Produto criado com ID: ' . $response->json('id'));
+            $this->line('Sucesso! Produto criado com ID: ' . $response->json('id'));
             $responseData = $response->json();
             if (isset($responseData['variants'])) {
-                $this->line('🎯 Campo variants retornado na resposta!');
+                $this->line('Campo variants retornado na resposta!');
                 $this->line('Variants: ' . json_encode($responseData['variants'], JSON_PRETTY_PRINT));
             } else {
-                $this->line('⚠️ Campo variants nao retornado na resposta');
+                $this->line('Campo variants nao retornado na resposta');
             }
         } else {
-            $this->line('⚠️ Falha - codigo ' . $response->status());
+            $this->line('Falha - codigo ' . $response->status());
             $this->line('Resposta: ' . $response->body());
         }
         

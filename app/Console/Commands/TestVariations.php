@@ -27,7 +27,7 @@ class TestVariations extends Command
      */
     public function handle()
     {
-        $this->info('🧪 Testando se a API Vendus suporta variações...');
+        $this->info('Testando se a API Vendus suporta variações...');
         
         // Produto de teste com variações
         $testProductWithVariants = [
@@ -81,20 +81,20 @@ class TestVariations extends Command
                 ->post($apiUrl, $testProductWithVariants);
 
             if ($response->successful()) {
-                $this->info('✅ SUCESSO! A API Vendus aceita produtos com variações!');
+                $this->info('SUCESSO! A API Vendus aceita produtos com variações!');
                 $this->line('Resposta da API:');
                 $this->line(json_encode($response->json(), JSON_PRETTY_PRINT));
                 
                 return 0;
             } else {
-                $this->error('❌ ERRO! A API rejeitou o produto com variações.');
+                $this->error('ERRO! A API rejeitou o produto com variações.');
                 $this->line('Status Code: ' . $response->status());
                 $this->line('Resposta:');
                 $this->line($response->body());
                 
                 // Agora testa sem variações para comparar
                 $this->line('');
-                $this->info('🔄 Testando o mesmo produto SEM variações...');
+                $this->info('Testando o mesmo produto SEM variações...');
                 
                 $testProductWithoutVariants = [
                     'reference' => 'TEST-NO-VARIANTS-' . time(),
@@ -117,10 +117,10 @@ class TestVariations extends Command
                     ->post($apiUrl, $testProductWithoutVariants);
                 
                 if ($response2->successful()) {
-                    $this->info('✅ Produto SEM variações foi aceito.');
-                    $this->warn('⚠️  Conclusão: A API não suporta variações ou o formato está incorreto.');
+                    $this->info('Produto SEM variações foi aceito.');
+                    $this->warn('Conclusão: A API não suporta variações ou o formato está incorreto.');
                 } else {
-                    $this->error('❌ Produto SEM variações também foi rejeitado.');
+                    $this->error('Produto SEM variações também foi rejeitado.');
                     $this->line('Status Code: ' . $response2->status());
                     $this->line('Resposta:');
                     $this->line($response2->body());
@@ -129,7 +129,7 @@ class TestVariations extends Command
                 return 1;
             }
         } catch (\Exception $e) {
-            $this->error('❌ Erro de conexão: ' . $e->getMessage());
+            $this->error('Erro de conexão: ' . $e->getMessage());
             return 1;
         }
     }

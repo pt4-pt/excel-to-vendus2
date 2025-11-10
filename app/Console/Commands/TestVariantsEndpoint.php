@@ -13,24 +13,24 @@ class TestVariantsEndpoint extends Command
 
     public function handle()
     {
-        $this->info('🔍 Testando o endpoint de variants da API Vendus v1.1...');
+        $this->info('Testando o endpoint de variants da API Vendus v1.1...');
         
         $vendusService = new VendusService();
         
         try {
             // Primeiro, vamos tentar listar variants existentes
-            $this->info('📋 Tentando listar variants existentes...');
+            $this->info('Tentando listar variants existentes...');
             $this->testListVariants($vendusService);
             
             // Depois, vamos tentar criar um produto com variants
-            $this->info('🆕 Tentando criar um produto com variants...');
+            $this->info('Tentando criar um produto com variants...');
             $this->testCreateProductWithVariants($vendusService);
             
         } catch (\Exception $e) {
-            $this->error('❌ Erro durante o teste: ' . $e->getMessage());
+            $this->error('Erro durante o teste: ' . $e->getMessage());
         }
         
-        $this->info('✨ Teste do endpoint de variants concluido!');
+        $this->info('Teste do endpoint de variants concluido!');
     }
     
     private function testListVariants($vendusService)
@@ -54,15 +54,15 @@ class TestVariantsEndpoint extends Command
             
             if ($response->successful()) {
                 $data = $response->json();
-                $this->info('✅ Endpoint de variants acessivel!');
+                $this->info('Endpoint de variants acessivel!');
                 $this->line('Resposta: ' . json_encode($data, JSON_PRETTY_PRINT));
             } else {
-                $this->warn("⚠️ Endpoint retornou codigo {$response->status()}");
+                $this->warn("Endpoint retornou codigo {$response->status()}");
                 $this->line('Resposta: ' . $response->body());
             }
             
         } catch (\Exception $e) {
-            $this->error('❌ Erro ao acessar endpoint de variants: ' . $e->getMessage());
+            $this->error('Erro ao acessar endpoint de variants: ' . $e->getMessage());
         }
     }
     
@@ -89,18 +89,18 @@ class TestVariantsEndpoint extends Command
             
             if ($result['success']) {
                 $productId = $result['data']['id'] ?? null;
-                $this->info("✅ Produto base criado com ID: {$productId}");
+                $this->info("Produto base criado com ID: {$productId}");
                 
                 if ($productId) {
                     // Agora tenta criar variants para este produto
                     $this->testCreateVariants($vendusService, $productId);
                 }
             } else {
-                $this->error('❌ Falha ao criar produto base: ' . $result['message']);
+                $this->error('Falha ao criar produto base: ' . $result['message']);
             }
             
         } catch (\Exception $e) {
-            $this->error('❌ Erro ao criar produto com variants: ' . $e->getMessage());
+            $this->error('Erro ao criar produto com variants: ' . $e->getMessage());
         }
     }
     
@@ -140,15 +140,15 @@ class TestVariantsEndpoint extends Command
             
             if ($response->successful()) {
                 $data = $response->json();
-                $this->info('✅ Variant criado com sucesso!');
+                $this->info('Variant criado com sucesso!');
                 $this->line('Resposta: ' . json_encode($data, JSON_PRETTY_PRINT));
             } else {
-                $this->warn("⚠️ Falha ao criar variant - codigo {$response->status()}");
+                $this->warn("Falha ao criar variant - codigo {$response->status()}");
                 $this->line('Resposta: ' . $response->body());
             }
             
         } catch (\Exception $e) {
-            $this->error('❌ Erro ao criar variant: ' . $e->getMessage());
+            $this->error('Erro ao criar variant: ' . $e->getMessage());
         }
     }
 }
