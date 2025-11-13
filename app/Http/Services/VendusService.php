@@ -6,166 +6,151 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use App\Models\FieldMapping;
+use App\Models\DocumentFieldMapping;
 use Exception;
+use Illuminate\Http\Client\RequestException;
 
 class VendusService
 {
     private string $apiKey;
+    private string $productsApiUrl;
+    private string $documentsApiUrl;
     private string $apiUrl;
 
     public function __construct()
     {
         $this->apiKey = (string) env('VENDUS_API_KEY');
-        // Normaliza e garante que o endpoint aponte para /products
-        $configuredUrl = (string) env('VENDUS_API_URL');
-        $this->apiUrl = $this->ensureProductsEndpoint($configuredUrl);
+        $this->productsApiUrl = (string) env('VENDUS_PRODUCTS_API_URL');
+        $this->documentsApiUrl = (string) env('VENDUS_DOCUMENTS_API_URL');
+        $this->apiUrl = (string) env('VENDUS_API_URL');
+    }
+
+    /**
+     * Mapeia valores de imposto para tax_id aceites pela API (NOR, INT, RED, ISE)
+     */
+    private function mapTaxId($tax, string $country = 'PT'): ?string
+    {
+        if ($tax === null || $tax === '') {
+            return null;
+        }
+        // Já é um código válido
+        $asStr = is_string($tax) ? strtoupper(trim($tax)) : null;
+        if ($asStr && in_array($asStr, ['NOR','RED','INT','ISE'], true)) {
+            return $asStr;
+        }
+        // Converter percentagens comuns
+        if (is_numeric($tax)) {
+            $pct = (float) $tax;
+            if ($pct >= 22 && $pct <= 23.5) return 'NOR';
+            if ($pct >= 12 && $pct <= 14) return 'INT';
+            if ($pct >= 5 && $pct <= 7) return 'RED';
+            if ($pct <= 0.001) return 'ISE';
+        }
+        // Fallback por país (Portugal: NOR)
+        return $country === 'PT' ? 'NOR' : null;
     }
 
     /**
      * Envia um produto para a API da Vendus
-     *
-     * @param array $data
-     * @return array
      */
-    public function sendProduct(array $data): array
+    public function sendProduct(array $productData): array
     {
+        $this->ensureProductsApiUrl();
+
+        $response = Http::withHeaders([
+            'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
+        ])->post($this->productsApiUrl, $productData);
+
+        if ($response->successful()) {
+            $responseData = $response->json();
+            if (isset($responseData['id'])) {
+                return ['success' => true, 'data' => $responseData];
+            }
+
+            $errorMessage = 'Resposta 2xx sem ID de produto. Verifique VENDUS_PRODUCTS_API_URL, credenciais e payload.';
+            Log::error($errorMessage, ['response' => $responseData]);
+            return ['success' => false, 'message' => $errorMessage];
+        }
+
         try {
-            if (empty($this->apiKey)) {
-                throw new Exception('VENDUS_API_KEY não configurada no .env');
-            }
-            // Constrói o payload usando os mapeamentos e valores padrão
-            $payload = $this->buildProductPayload($data);
-            // Log leve para depuração de unit_id
-            try {
-                Log::info('Enviando produto para Vendus', [
-                    'reference' => $payload['reference'] ?? ($data['reference'] ?? null),
-                    'title' => $payload['title'] ?? ($data['title'] ?? null),
-                    'unit_id' => $payload['unit_id'] ?? null,
-                    'has_prices' => isset($payload['prices']),
-                    'price_top' => $payload['price'] ?? null,
-                    'prices_payload' => $payload['prices'] ?? null,
-                ]);
-            } catch (\Exception $e) {}
-            
-            $response = Http::withToken($this->apiKey)
-                ->timeout(30)
-                ->withOptions([
-                    'verify' => false, // Desabilita verificação SSL para desenvolvimento
-                    'curl' => [
-                        CURLOPT_SSL_VERIFYPEER => false,
-                        CURLOPT_SSL_VERIFYHOST => false,
-                    ]
-                ])
-                ->post($this->apiUrl, $payload);
-
-            $body = $response->json();
-            $location = $response->header('Location');
-            $hasId = is_array($body) && (isset($body['id']) || isset($body['product_id']));
-            $created = $response->successful() && ($hasId || ($location && str_contains($location, '/products')));
-
-            if ($created) {
-                return [
-                    'success' => true,
-                    'status_code' => $response->status(),
-                    'data' => $response->json(),
-                    'message' => 'Produto enviado com sucesso'
-                ];
-            } else {
-                // Fallback: tentar criação com Basic Auth (alguns ambientes exigem)
-                $response2 = Http::withBasicAuth($this->apiKey, '')
-                    ->timeout(30)
-                    ->withOptions([
-                        'verify' => false,
-                        'curl' => [
-                            CURLOPT_SSL_VERIFYPEER => false,
-                            CURLOPT_SSL_VERIFYHOST => false,
-                        ]
-                    ])
-                    ->post($this->apiUrl, $payload);
-
-                $body2 = $response2->json();
-                $location2 = $response2->header('Location');
-                $hasId2 = is_array($body2) && (isset($body2['id']) || isset($body2['product_id']));
-                $created2 = $response2->successful() && ($hasId2 || ($location2 && str_contains($location2, '/products')));
-
-                if ($created2) {
-                    return [
-                        'success' => true,
-                        'status_code' => $response2->status(),
-                        'data' => $response2->json(),
-                        'message' => 'Produto enviado com sucesso'
-                    ];
-                }
-
-                // Prossegue com tratamento de erro usando a última resposta
-                $response = $response2;
-                $body = $body2;
-                $location = $location2;
-                $hasId = $hasId2;
-
-                $errorMessage = 'Erro desconhecido';
-                $responseData = $body;
-                
-                if (isset($responseData['errors']) && is_array($responseData['errors']) && !empty($responseData['errors'])) {
-                    $firstError = $responseData['errors'][0];
-                    if (isset($firstError['message'])) {
-                        $errorMessage = $firstError['message'];
-
-                        if (isset($firstError['code'])) {
-                            $errorMessage = "[{$firstError['code']}] {$errorMessage}";
-
-                            if ($firstError['code'] === 'P005') {
-                                $errorMessage .= ' — Verifique o unit_id: mapeie a Unidade com um ID válido ou defina VENDUS_DEFAULT_UNIT_ID no .env.';
-                            }
-
-                            if ($firstError['code'] === 'A001') {
-                                $foundId = $this->findProductId($payload);
-                                if ($foundId) {
-                                        $update = $this->updateProduct($foundId, $payload);
-                                        if ($update['success'] ?? false) {
-                                            return [
-                                                'success' => true,
-                                                'status_code' => $update['status_code'] ?? 200,
-                                                'data' => $update['data'] ?? [],
-                                                'message' => 'Produto atualizado com sucesso (referência já existia)'
-                                            ];
-                                        } else {
-                                            $errorMessage .= ' — tentativa de atualização falhou: ' . ($update['message'] ?? 'desconhecido');
-                                        }
-                                } else {
-                                    $errorMessage .= ' — referência existente, mas não foi possível obter ID para atualização.';
-                                }
-                            }
-                        }
+            $responseData = $response->json();
+            if ($response->status() === 400 && isset($responseData['errors'])) {
+                foreach ($responseData['errors'] as $error) {
+                    if (isset($error['code']) && $error['code'] === 'A001') {
+                        return $this->updateProductByReference($productData);
                     }
-                } elseif (isset($responseData['message'])) {
-                    $errorMessage = $responseData['message'];
-                } elseif ($response->successful() && !$hasId) {
-                    $errorMessage = 'Resposta 2xx sem ID de produto. Verifique VENDUS_API_URL (deve terminar em /products), credenciais e payload.';
                 }
-                
-                $ref = $data['reference'] ?? ($payload['reference'] ?? ($data['title'] ?? 'unknown'));
-                $this->logError($ref, $response->status(), $errorMessage, $response->body());
-                
-                return [
-                    'success' => false,
-                    'status_code' => $response->status(),
-                    'error' => $errorMessage,
-                    'message' => "Erro ao enviar produto: {$errorMessage}"
-                ];
             }
-        } catch (Exception $e) {
-            $this->logError($data['reference'] ?? 'unknown', 0, $e->getMessage(), '');
-            
-            return [
-                'success' => false,
-                'status_code' => 0,
-                'error' => $e->getMessage(),
-                'message' => "Erro de conexão: {$e->getMessage()}"
-            ];
+
+            $errorMessage = 'Erro ao enviar produto para a Vendus API.';
+            Log::error($errorMessage, [
+                'status' => $response->status(),
+                'response' => $responseData,
+                'product_data' => $productData
+            ]);
+            return ['success' => false, 'message' => $errorMessage, 'errors' => $responseData['errors'] ?? []];
+        } catch (RequestException $e) {
+            $errorMessage = 'Erro de comunicação ao enviar produto para a Vendus API.';
+            Log::error($errorMessage, [
+                'exception_message' => $e->getMessage(),
+                'product_data' => $productData
+            ]);
+            return ['success' => false, 'message' => $errorMessage];
         }
     }
 
+    /**
+     * Atualiza um produto existente na API da Vendus, procurando-o pela referência.
+     */
+    private function updateProductByReference(array $productData): array
+    {
+        $this->ensureProductsApiUrl();
+
+        // Assumindo que a referência do produto é única e pode ser usada para encontrá-lo
+        $reference = $productData['reference'];
+        $searchResponse = Http::withHeaders([
+            'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
+        ])->get($this->productsApiUrl, ['reference' => $reference]);
+
+        if ($searchResponse->successful() && !empty($searchResponse->json())) {
+            $existingProducts = $searchResponse->json();
+            $productId = $existingProducts[0]['id']; // Pega o ID do primeiro produto encontrado
+
+            $updateResponse = Http::withHeaders([
+                'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
+            ])->put($this->productsApiUrl . '/' . $productId, $productData);
+
+            if ($updateResponse->successful()) {
+                return ['success' => true, 'data' => $updateResponse->json(), 'action' => 'updated'];
+            }
+
+            $errorMessage = 'Erro ao atualizar produto na Vendus API.';
+            Log::error($errorMessage, [
+                'status' => $updateResponse->status(),
+                'response' => $updateResponse->json(),
+                'product_data' => $productData
+            ]);
+            return ['success' => false, 'message' => $errorMessage, 'errors' => $updateResponse->json()['errors'] ?? []];
+        }
+
+        $errorMessage = 'Produto não encontrado para atualização ou erro na busca.';
+        Log::error($errorMessage, [
+            'status' => $searchResponse->status(),
+            'response' => $searchResponse->json(),
+            'reference' => $reference
+        ]);
+        return ['success' => false, 'message' => $errorMessage];
+    }
+
+    /**
+     * Garante que a URL da API de produtos está corretamente formatada.
+     */
+    private function ensureProductsApiUrl(): void
+    {
+        if (str_ends_with($this->productsApiUrl, '/')) {
+            $this->productsApiUrl = rtrim($this->productsApiUrl, '/');
+        }
+    }
     /**
      * Envia um documento (PDF) para a API de Documentos da Vendus
      * Tenta com Bearer Token e, em seguida, com Basic Auth.
@@ -191,7 +176,6 @@ class VendusService
                 'filename' => $filename,
             ]);
 
-            // 1) Tentativa com Bearer Token
             $response = Http::withToken($this->apiKey)
                 ->timeout(30)
                 ->withOptions([
@@ -211,7 +195,6 @@ class VendusService
             $created = $ok && ($hasId || ($location && str_contains((string)$location, '/documents')));
 
             if (!$created) {
-                // 2) Fallback com Basic Auth
                 $response2 = Http::withBasicAuth($this->apiKey, '')
                     ->timeout(30)
                     ->withOptions([
@@ -276,101 +259,224 @@ class VendusService
                 throw new Exception('VENDUS_API_KEY não configurada no .env');
             }
 
-            $documentsUrl = $this->getDocumentsEndpoint();
-
-            // Monta payload básico a partir do array recebido
             $header = (array) ($invoice['header'] ?? []);
             $items = (array) ($invoice['items'] ?? []);
+            // Contexto opcional: store e register via header ou .env
+            $storeId = (isset($header['store_id']) && is_numeric($header['store_id']))
+                ? (int) $header['store_id']
+                : ($this->resolveStoreIdFromInvoice($invoice) ?? env('VENDUS_STORE_ID'));
+            $registerId = (isset($header['register_id']) && is_numeric($header['register_id']))
+                ? (int) $header['register_id']
+                : ($this->resolveRegisterIdFromInvoice($invoice, is_numeric($storeId) ? (int)$storeId : null) ?? env('VENDUS_REGISTER_ID'));
+            $nif = $header['customer_nif'] ?? null;
+            $nifForCommercial = ($nif === '999999990' || $nif === 999999990) ? null : $nif;
+            $clientId = is_numeric($header['client_id'] ?? null) ? (int) $header['client_id'] : null;
+            $clientEmail = $header['customer_email'] ?? null;
+            $clientExternalRef = $header['external_reference'] ?? null;
+            $clientObj = null;
+            if ($clientId || $nifForCommercial || ($clientExternalRef && $clientExternalRef !== '') || ($clientEmail && $clientEmail !== '')) {
+                $clientObj = array_filter([
+                    'id' => $clientId,
+                    'fiscal_id' => $nifForCommercial,
+                    'name' => $header['customer_name'] ?? null,
+                    'country' => $header['customer_country'] ?? 'PT',
+                    'email' => $clientEmail,
+                    'external_reference' => $clientExternalRef,
+                ], function ($v) {
+                    if ($v === null) return false;
+                    if (is_string($v)) return $v !== '';
+                    return true;
+                });
+            }
 
-            $payload = [
-                'series' => $header['series'] ?? null,
-                'customer_name' => $header['customer_name'] ?? null,
-                'customer_nif' => $header['customer_nif'] ?? null,
+            // Payload comercial removido – foco total em ws v1.2
+
+            $legacyPayload = [
+                'type' => isset($header['type']) && is_string($header['type']) && $header['type'] !== '' ? (string)$header['type'] : 'FT',
+                'serie_id' => is_numeric($header['series'] ?? null) ? (int) $header['series'] : null,
                 'date' => $header['date'] ?? null,
-                'notes' => $header['notes'] ?? null,
-                // Alguns formatos utilizam 'items', outros 'products'; enviamos ambos para ampliar compatibilidade
-                'items' => array_map(function ($i) {
-                    return [
+                'notes' => $header['notes'] ?? ($header['external_reference'] ? ('Ref: ' . $header['external_reference']) : null),
+                'external_reference' => $header['external_reference'] ?? null,
+                // Pedir mensagens de erro detalhadas, quando suportado
+                'errors_full' => isset($header['errors_full']) && $header['errors_full'] !== null && $header['errors_full'] !== '' ? (string)$header['errors_full'] : 'yes',
+                'date_due' => $header['date_due'] ?? null,
+                'date_supply' => $header['date_supply'] ?? null,
+                'discount_code' => $header['discount_code'] ?? null,
+                'discount_amount' => is_numeric($header['discount_amount'] ?? null) ? (float)$header['discount_amount'] : null,
+                'discount_percentage' => is_numeric($header['discount_percentage'] ?? null) ? (float)$header['discount_percentage'] : null,
+                'mode' => $header['mode'] ?? null,
+                'stock_operation' => $header['stock_operation'] ?? null,
+                'ifthenpay' => $header['ifthenpay'] ?? null,
+                'eupago' => $header['eupago'] ?? null,
+                'print_discount' => $header['print_discount'] ?? null,
+                'output' => $header['output'] ?? null,
+                'output_template_id' => is_numeric($header['output_template_id'] ?? null) ? (int)$header['output_template_id'] : null,
+                'tx_id' => $header['tx_id'] ?? null,
+                'rest_room' => is_numeric($header['rest_room'] ?? null) ? (int)$header['rest_room'] : null,
+                'rest_table' => is_numeric($header['rest_table'] ?? null) ? (int)$header['rest_table'] : null,
+                'occupation' => is_numeric($header['occupation'] ?? null) ? (int)$header['occupation'] : null,
+                'stamp_retention_amount' => is_numeric($header['stamp_retention_amount'] ?? null) ? (float)$header['stamp_retention_amount'] : null,
+                'irc_retention_id' => $header['irc_retention_id'] ?? null,
+                'mgmAmount' => is_numeric($header['mgmAmount'] ?? null) ? (float)$header['mgmAmount'] : null,
+                'related_document_id' => is_numeric($header['related_document_id'] ?? null) ? (int)$header['related_document_id'] : null,
+                'return_qrcode' => $header['return_qrcode'] ?? null,
+                'doc_to_generate' => $header['doc_to_generate'] ?? null,
+                'ncr_id' => $header['ncr_id'] ?? null,
+
+                'client' => $clientObj,
+                'store_id' => $storeId ? (int) $storeId : null,
+                'register_id' => $registerId ? (int) $registerId : null,
+
+                'items' => array_map(function ($i) use ($header) {
+                    $qty = $i['quantity'] ?? ($i['qty'] ?? 1);
+                    $unitOrGross = $i['gross_price'] ?? ($i['unit_price'] ?? ($i['price'] ?? null));
+                    $taxRaw = $i['tax_id'] ?? ($i['tax'] ?? null);
+                    $mappedTax = $this->mapTaxId($taxRaw, $header['customer_country'] ?? 'PT');
+
+                    $line = [
                         'reference' => $i['reference'] ?? null,
                         'title' => $i['title'] ?? null,
-                        'qty' => $i['quantity'] ?? ($i['qty'] ?? 1),
-                        'gross_price' => isset($i['gross_price']) ? number_format((float)$i['gross_price'], 2, '.', '') : null,
-                        'tax' => $i['tax'] ?? null,
+                        'qty' => is_numeric($qty) ? (float)$qty : 1,
+                        'gross_price' => isset($unitOrGross) ? number_format((float)$unitOrGross, 2, '.', '') : null,
+                        'tax_id' => $mappedTax,
                     ];
-                }, $items),
-                'products' => array_map(function ($i) {
-                    return [
-                        'reference' => $i['reference'] ?? null,
-                        'title' => $i['title'] ?? null,
-                        'qty' => $i['quantity'] ?? ($i['qty'] ?? 1),
-                        'gross_price' => isset($i['gross_price']) ? number_format((float)$i['gross_price'], 2, '.', '') : null,
-                        'tax' => $i['tax'] ?? null,
-                    ];
+
+                    return array_filter($line, function ($v) {
+                        if ($v === null) return false;
+                        if (is_string($v)) return $v !== '';
+                        return true;
+                    });
                 }, $items),
             ];
 
-            // Remove chaves nulas para evitar rejeições
-            $payload = array_filter($payload, function ($v) {
+            $legacyPayload = array_filter($legacyPayload, function ($v) {
                 if ($v === null) return false;
                 if (is_array($v)) return !empty($v);
                 return true;
             });
 
-            Log::info('Enviando fatura (JSON) para Vendus', [
-                'endpoint' => $documentsUrl,
-                'items' => count($payload['items'] ?? []),
-                'customer_name' => $payload['customer_name'] ?? null,
-                'series' => $payload['series'] ?? null,
-            ]);
+            $endpoints = $this->getPossibleSalesDocumentsEndpoints();
+            $lastAttemptEndpoint = null;
+            $lastAttemptAuth = null;
 
-            // 1) Tentativa com Bearer Token
-            $resp = Http::withToken($this->apiKey)
-                ->timeout(30)
-                ->withOptions([
-                    'verify' => false,
-                    'curl' => [
-                        CURLOPT_SSL_VERIFYPEER => false,
-                        CURLOPT_SSL_VERIFYHOST => false,
-                    ]
-                ])
-                ->post($documentsUrl, $payload);
+            // Apenas endpoints WS v1.2 e payload legado; prioriza Basic Auth
+            $lastStatus = null;
+            $lastResponseBody = null;
+            foreach ($endpoints as $endpoint) {
+                $authOptions = [false, true]; // false => Basic, true => Bearer
+                foreach ($authOptions as $useBearerLegacy) {
+                    $client2 = $useBearerLegacy ? Http::withToken($this->apiKey) : Http::withBasicAuth($this->apiKey, '');
+                    $lastAttemptEndpoint = $endpoint;
+                    $lastAttemptAuth = $useBearerLegacy ? 'Bearer' : 'Basic';
+                    try {
+                        $resp2 = $client2
+                            ->timeout(30)
+                            ->withOptions([
+                                'verify' => false,
+                                'curl' => [
+                                    CURLOPT_SSL_VERIFYPEER => false,
+                                    CURLOPT_SSL_VERIFYHOST => false,
+                                ]
+                            ])
+                            ->withHeaders([
+                                'Content-Type' => 'application/json',
+                                'Accept' => 'application/json',
+                            ])
+                            ->post($endpoint, $legacyPayload);
 
-            if ($resp->successful()) {
-                return [
-                    'success' => true,
-                    'status_code' => $resp->status(),
-                    'data' => $resp->json(),
-                    'message' => 'Fatura enviada com sucesso'
-                ];
+                        Log::info('Tentativa envio fatura (ws v1.2)', [
+                            'endpoint' => $endpoint,
+                            'auth' => $useBearerLegacy ? 'Bearer' : 'Basic',
+                            'status' => $resp2->status(),
+                        ]);
+                        $lastStatus = $resp2->status();
+                        $lastResponseBody = $resp2->body();
+                        Log::info('Resposta API Vendus (ws v1.2)', [
+                            'endpoint' => $endpoint,
+                            'auth' => $useBearerLegacy ? 'Bearer' : 'Basic',
+                            'status' => $resp2->status(),
+                            'content_type' => $resp2->header('Content-Type'),
+                            'headers' => [
+                                'Location' => $resp2->header('Location'),
+                                'Content-Location' => $resp2->header('Content-Location'),
+                            ],
+                            'raw_body' => substr((string)$lastResponseBody, 0, 2000),
+                        ]);
+
+                        if ($resp2->successful()) {
+                            $data = $resp2->json();
+                            $location = $resp2->header('Location') ?? $resp2->header('Content-Location') ?? null;
+                            $contentType = $resp2->header('Content-Type') ?? '';
+                            $createdId = null;
+                            $docNum = null;
+                            if (is_array($data)) {
+                                $createdId = $data['id'] ?? ($data['document_id'] ?? null);
+                                $docNum = $data['document_number'] ?? ($data['number'] ?? null);
+                                if (!$createdId && isset($data['document']) && is_array($data['document'])) {
+                                    $createdId = $data['document']['id'] ?? null;
+                                    $docNum = $docNum ?? ($data['document']['number'] ?? null);
+                                }
+                            }
+
+                            if ($createdId || ($location && preg_match('#/(sales/)?documents/\\d+$#', (string)$location))) {
+                                return [
+                                    'success' => true,
+                                    'status_code' => $resp2->status(),
+                                    'data' => $data,
+                                    'message' => 'Fatura enviada com sucesso',
+                                    'endpoint_used' => $endpoint,
+                                    'auth_used' => $useBearerLegacy ? 'Bearer' : 'Basic',
+                                ];
+                            }
+
+                            // Sucesso HTTP mas sem criação detectável – continuar a tentar outros endpoints
+                            Log::warning('Sucesso HTTP sem ID/Location ao enviar fatura (ws v1.2)', [
+                                'endpoint' => $endpoint,
+                                'status' => $resp2->status(),
+                                'headers' => [
+                                    'Location' => $resp2->header('Location'),
+                                    'Content-Location' => $resp2->header('Content-Location'),
+                                    'Content-Type' => $contentType,
+                                ],
+                                'body' => $data,
+                                'raw_body' => substr((string)$lastResponseBody, 0, 2000),
+                            ]);
+                        }
+                        else {
+                            // Falha HTTP – regista detalhes do erro para diagnóstico
+                            $contentType = $resp2->header('Content-Type') ?? '';
+                            $json = null;
+                            try { $json = $resp2->json(); } catch (\Throwable $t) { $json = null; }
+                            Log::error('Erro HTTP ao enviar fatura (ws v1.2)', [
+                                'endpoint' => $endpoint,
+                                'auth' => $useBearerLegacy ? 'Bearer' : 'Basic',
+                                'status' => $resp2->status(),
+                                'headers' => [
+                                    'Location' => $resp2->header('Location'),
+                                    'Content-Location' => $resp2->header('Content-Location'),
+                                    'Content-Type' => $contentType,
+                                ],
+                                'errors' => is_array($json) && isset($json['errors']) ? $json['errors'] : null,
+                                'raw_body' => substr($resp2->body() ?? '', 0, 1000),
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        // Continua tentando
+                    }
+                }
             }
 
-            // 2) Fallback com Basic Auth
-            $resp2 = Http::withBasicAuth($this->apiKey, '')
-                ->timeout(30)
-                ->withOptions([
-                    'verify' => false,
-                    'curl' => [
-                        CURLOPT_SSL_VERIFYPEER => false,
-                        CURLOPT_SSL_VERIFYHOST => false,
-                    ]
-                ])
-                ->post($documentsUrl, $payload);
-
-            if ($resp2->successful()) {
-                return [
-                    'success' => true,
-                    'status_code' => $resp2->status(),
-                    'data' => $resp2->json(),
-                    'message' => 'Fatura enviada com sucesso'
-                ];
-            }
-
-            $this->logError('invoice', $resp2->status(), 'Falha ao enviar fatura (JSON)', $resp2->body());
+            // Se chegou aqui, todas as tentativas falharam; reporta o último endpoint tentado, se houver
+            $lastEndpoint = $lastAttemptEndpoint ?: (end($endpoints) ?: 'desconhecido');
+            $statusToReport = $lastStatus ?? 400;
+            $this->logError('invoice', $statusToReport, 'Falha ao enviar fatura (todas tentativas)', 'Verifique endpoint e payload. Último endpoint: ' . $lastEndpoint . ' | auth: ' . ($lastAttemptAuth ?: 'desconhecido') . ($lastResponseBody ? (' | body: ' . substr((string)$lastResponseBody, 0, 500)) : ''));
             return [
                 'success' => false,
-                'status_code' => $resp2->status(),
+                'status_code' => $statusToReport,
                 'message' => 'Falha ao enviar fatura',
-                'error' => $resp2->body(),
+                'error' => 'Não foi possível enviar a fatura após tentar múltiplos endpoints',
+                'endpoint_used' => $lastEndpoint,
+                'auth_used' => $lastAttemptAuth,
             ];
 
         } catch (Exception $e) {
@@ -388,16 +494,41 @@ class VendusService
      */
     private function getDocumentsEndpoint(): string
     {
-        $productsUrl = rtrim($this->apiUrl, '/');
-        // Substitui /products por /documents ou usa default
-        if (preg_match('#/products$#', $productsUrl)) {
-            return preg_replace('#/products$#', '/documents', $productsUrl);
+        $this->ensureDocumentsApiUrl();
+        return $this->documentsApiUrl;
+    }
+
+    /**
+     * Garante que a URL da API de documentos está corretamente formatada.
+     */
+    private function ensureDocumentsApiUrl(): void
+    {
+        if (str_ends_with($this->documentsApiUrl, '/')) {
+            $this->documentsApiUrl = rtrim($this->documentsApiUrl, '/');
         }
-        $base = preg_replace('#/products/?#', '', $productsUrl);
-        if ($base === '') {
-            return 'https://www.vendus.pt/ws/v1.2/documents';
+    }
+    private function getPossibleSalesDocumentsEndpoints(): array
+    {
+        $this->ensureDocumentsApiUrl();
+        $base = rtrim($this->documentsApiUrl, '/');
+        $list = [];
+        $list[] = $base;
+        if (!preg_match('#/sales/documents$#', $base)) {
+            $list[] = $base . '/sales/documents';
         }
-        return rtrim($base, '/') . '/documents';
+        if (!preg_match('#/documents$#', $base)) {
+            $list[] = $base . '/documents';
+        }
+        $apiBase = rtrim((string) $this->apiUrl, '/');
+        if ($apiBase !== '') {
+            $list[] = $apiBase . '/ws/v1.2/sales/documents';
+            $list[] = $apiBase . '/ws/v1.2/documents';
+            $list[] = $apiBase . '/ws/v1.1/sales/documents';
+            $list[] = $apiBase . '/ws/v1.1/documents';
+            $list[] = $apiBase . '/ws/v1.0/sales/documents';
+            $list[] = $apiBase . '/ws/v1.0/documents';
+        }
+        return array_values(array_unique(array_filter($list)));
     }
 
     private function findProductId(array $payload): ?int
@@ -413,7 +544,7 @@ class VendusService
         if ($barcode !== '') {
             $queries = ['barcode', 'upc', 'ean'];
             foreach ($queries as $param) {
-                $url = $this->apiUrl . '?' . $param . '=' . urlencode($barcode);
+                $url = $this->productsApiUrl . '?' . $param . '=' . urlencode($barcode);
                 try {
                     $resp = Http::withToken($this->apiKey)
                         ->timeout(20)
@@ -477,7 +608,7 @@ class VendusService
         ];
 
         foreach ($queries as $param) {
-            $url = $this->apiUrl . '?' . $param . '=' . urlencode($reference);
+            $url = $this->productsApiUrl . '?' . $param . '=' . urlencode($reference);
             try {
                 // 1) Bearer Token
                 $resp = Http::withToken($this->apiKey)
@@ -554,7 +685,7 @@ class VendusService
      */
     public function updateProduct(int $productId, array $payload): array
     {
-        $url = rtrim($this->apiUrl, '/') . '/' . $productId;
+        $url = rtrim($this->productsApiUrl, '/') . '/' . $productId;
 
         try {
             // Evita conflito de referência durante atualização
@@ -969,7 +1100,7 @@ class VendusService
     {
         try {
             // Constrói lista de endpoints possíveis cobrindo v1.2, v1.1 e v1.0
-            $base = preg_replace('#/products$#', '', $this->apiUrl);
+            $base = preg_replace('#/products$#', '', $this->productsApiUrl);
             $v12 = $base; // ex.: https://www.vendus.pt/ws/v1.2
             $v11 = preg_replace('#/v1\.2$#', '/v1.1', $v12);
             $v10 = preg_replace('#/v1\.1$#', '/v1.0', $v11);
@@ -1035,6 +1166,259 @@ class VendusService
                 'message' => 'Erro de conexão ao obter unidades'
             ];
         }
+    }
+
+    private function resolveStoreIdFromInvoice(array $invoice): ?int
+    {
+        $header = (array) ($invoice['header'] ?? []);
+        $name = null;
+        if (isset($header['store_title']) && is_string($header['store_title'])) {
+            $name = trim($header['store_title']);
+        } elseif (isset($header['register_title']) && is_string($header['register_title'])) {
+            $name = trim($header['register_title']);
+        }
+        if ($name === null || $name === '') {
+            return null;
+        }
+        $pair = $this->getRegisterAndStoreByTitle($name);
+        return $pair ? ($pair['store_id'] ?? null) : null;
+    }
+
+    private function getStoreIdByName(string $name): ?int
+    {
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $v12 = $base;
+        $v11 = preg_replace('#/v1\.2$#', '/v1.1', $v12);
+        $v10 = preg_replace('#/v1\.1$#', '/v1.0', $v11);
+        $possibleEndpoints = array_values(array_unique(array_filter([
+            $v12 . '/stores',
+            $v12 . '/store',
+            $v11 . '/stores',
+            $v10 . '/stores',
+        ])));
+        foreach ($possibleEndpoints as $endpoint) {
+            try {
+                $resp = Http::withBasicAuth($this->apiKey, '')
+                    ->timeout(30)
+                    ->withOptions([
+                        'verify' => false,
+                        'curl' => [
+                            CURLOPT_SSL_VERIFYPEER => false,
+                            CURLOPT_SSL_VERIFYHOST => false,
+                        ]
+                    ])
+                    ->get($endpoint);
+                if ($resp->successful()) {
+                    $data = $resp->json();
+                    if (is_array($data)) {
+                        if (isset($data['id']) && isset($data['title'])) {
+                            $title = is_string($data['title']) ? trim($data['title']) : '';
+                            if ($title !== '' && strtolower($title) === strtolower($name) && is_numeric($data['id'])) {
+                                return (int) $data['id'];
+                            }
+                        }
+                        foreach ($data as $item) {
+                            if (is_array($item) && isset($item['title']) && isset($item['id'])) {
+                                $title = is_string($item['title']) ? trim($item['title']) : '';
+                                if ($title !== '' && strtolower($title) === strtolower($name) && is_numeric($item['id'])) {
+                                    return (int) $item['id'];
+                                }
+                            }
+                        }
+                        if (isset($data['data']) && is_array($data['data'])) {
+                            foreach ($data['data'] as $item) {
+                                if (is_array($item) && isset($item['title']) && isset($item['id'])) {
+                                    $title = is_string($item['title']) ? trim($item['title']) : '';
+                                    if ($title !== '' && strtolower($title) === strtolower($name) && is_numeric($item['id'])) {
+                                        return (int) $item['id'];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+            }
+        }
+        return null;
+    }
+
+    private function resolveRegisterIdFromInvoice(array $invoice, ?int $storeId): ?int
+    {
+        $header = (array) ($invoice['header'] ?? []);
+        $name = null;
+        if (isset($header['register_title']) && is_string($header['register_title'])) {
+            $name = trim($header['register_title']);
+        } elseif (isset($header['store_title']) && is_string($header['store_title'])) {
+            $name = trim($header['store_title']);
+        }
+        if ($name && $name !== '') {
+            $pair = $this->getRegisterAndStoreByTitle($name);
+            if ($pair && isset($pair['register_id']) && is_numeric($pair['register_id'])) {
+                return (int) $pair['register_id'];
+            }
+        }
+        if ($storeId !== null) {
+            return $this->getApiRegisterIdForStore($storeId);
+        }
+        return null;
+    }
+
+    private function getRegisterAndStoreByTitle(string $title): ?array
+    {
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $v12 = $base;
+        $v11 = preg_replace('#/v1\.2$#', '/v1.1', $v12);
+        $v10 = preg_replace('#/v1\.1$#', '/v1.0', $v11);
+        $possibleEndpoints = array_values(array_unique(array_filter([
+            $v12 . '/registers',
+            $v11 . '/registers',
+            $v10 . '/registers',
+        ])));
+        foreach ($possibleEndpoints as $endpoint) {
+            try {
+                $resp = Http::withBasicAuth($this->apiKey, '')
+                    ->timeout(30)
+                    ->withOptions([
+                        'verify' => false,
+                        'curl' => [
+                            CURLOPT_SSL_VERIFYPEER => false,
+                            CURLOPT_SSL_VERIFYHOST => false,
+                        ]
+                    ])
+                    ->get($endpoint);
+                if ($resp->successful()) {
+                    $data = $resp->json();
+                    $items = [];
+                    if (is_array($data)) {
+                        if (isset($data['data']) && is_array($data['data'])) {
+                            $items = $data['data'];
+                        } else {
+                            $items = $data;
+                        }
+                    }
+                    foreach ($items as $item) {
+                        if (!is_array($item)) continue;
+                        $t = isset($item['title']) && is_string($item['title']) ? trim($item['title']) : '';
+                        if ($t !== '' && strtolower($t) === strtolower($title)) {
+                            $regId = isset($item['id']) && is_numeric($item['id']) ? (int) $item['id'] : null;
+                            $storeId = isset($item['store_id']) && is_numeric($item['store_id']) ? (int) $item['store_id'] : null;
+                            if ($regId !== null || $storeId !== null) {
+                                return [
+                                    'register_id' => $regId,
+                                    'store_id' => $storeId,
+                                ];
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+            }
+        }
+        return null;
+    }
+
+    private function getRegisterIdByName(string $name, ?int $storeId): ?int
+    {
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $v12 = $base;
+        $v11 = preg_replace('#/v1\.2$#', '/v1.1', $v12);
+        $v10 = preg_replace('#/v1\.1$#', '/v1.0', $v11);
+        $possibleEndpoints = array_values(array_unique(array_filter([
+            $v12 . '/registers',
+            $v12 . '/store-registers',
+            $storeId ? ($v12 . '/stores/' . $storeId . '/registers') : null,
+            $v11 . '/registers',
+            $v10 . '/registers',
+        ])));
+        foreach ($possibleEndpoints as $endpoint) {
+            try {
+                $resp = Http::withBasicAuth($this->apiKey, '')
+                    ->timeout(30)
+                    ->withOptions([
+                        'verify' => false,
+                        'curl' => [
+                            CURLOPT_SSL_VERIFYPEER => false,
+                            CURLOPT_SSL_VERIFYHOST => false,
+                        ]
+                    ])
+                    ->get($endpoint);
+                if ($resp->successful()) {
+                    $data = $resp->json();
+                    if (is_array($data)) {
+                        foreach ($data as $item) {
+                            if (is_array($item)) {
+                                $title = isset($item['title']) && is_string($item['title']) ? trim($item['title']) : (isset($item['name']) && is_string($item['name']) ? trim($item['name']) : '');
+                                if ($title !== '' && strtolower($title) === strtolower($name) && isset($item['id']) && is_numeric($item['id'])) {
+                                    return (int) $item['id'];
+                                }
+                            }
+                        }
+                        if (isset($data['data']) && is_array($data['data'])) {
+                            foreach ($data['data'] as $item) {
+                                if (is_array($item)) {
+                                    $title = isset($item['title']) && is_string($item['title']) ? trim($item['title']) : (isset($item['name']) && is_string($item['name']) ? trim($item['name']) : '');
+                                    if ($title !== '' && strtolower($title) === strtolower($name) && isset($item['id']) && is_numeric($item['id'])) {
+                                        return (int) $item['id'];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+            }
+        }
+        return null;
+    }
+
+    private function getApiRegisterIdForStore(int $storeId): ?int
+    {
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $v12 = $base;
+        $possibleEndpoints = array_values(array_unique(array_filter([
+            $v12 . '/stores/' . $storeId . '/registers',
+            $v12 . '/registers?store_id=' . $storeId,
+        ])));
+        foreach ($possibleEndpoints as $endpoint) {
+            try {
+                $resp = Http::withBasicAuth($this->apiKey, '')
+                    ->timeout(30)
+                    ->withOptions([
+                        'verify' => false,
+                        'curl' => [
+                            CURLOPT_SSL_VERIFYPEER => false,
+                            CURLOPT_SSL_VERIFYHOST => false,
+                        ]
+                    ])
+                    ->get($endpoint);
+                if ($resp->successful()) {
+                    $data = $resp->json();
+                    if (is_array($data)) {
+                        foreach ($data as $item) {
+                            if (is_array($item)) {
+                                $type = isset($item['type']) ? $item['type'] : (isset($item['register_type']) ? $item['register_type'] : null);
+                                if (is_string($type) && strtoupper(trim($type)) === 'API' && isset($item['id']) && is_numeric($item['id'])) {
+                                    return (int) $item['id'];
+                                }
+                            }
+                        }
+                        if (isset($data['data']) && is_array($data['data'])) {
+                            foreach ($data['data'] as $item) {
+                                if (is_array($item)) {
+                                    $type = isset($item['type']) ? $item['type'] : (isset($item['register_type']) ? $item['register_type'] : null);
+                                    if (is_string($type) && strtoupper(trim($type)) === 'API' && isset($item['id']) && is_numeric($item['id'])) {
+                                        return (int) $item['id'];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+            }
+        }
+        return null;
     }
 
     /**

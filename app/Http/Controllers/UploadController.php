@@ -78,6 +78,9 @@ class UploadController extends Controller
 
                 foreach ($groupedInvoices as $key => $invoiceRows) {
                     $invoiceData = $this->buildInvoiceData($invoiceRows, $headerMap);
+                    // Adiciona referência externa para rastrear a criação no ERP
+                    if (!isset($invoiceData['header'])) { $invoiceData['header'] = []; }
+                    $invoiceData['header']['external_reference'] = (string) $key;
 
                     $apiResult = $this->vendusService->sendInvoice($invoiceData);
                     if ($apiResult['success'] ?? false) {
@@ -85,14 +88,18 @@ class UploadController extends Controller
                             'type' => 'success',
                             'message' => 'Fatura enviada com sucesso',
                             'reference' => (string) $key,
-                            'status_code' => $apiResult['status_code'] ?? 200
+                            'status_code' => $apiResult['status_code'] ?? 200,
+                            'endpoint' => $apiResult['endpoint_used'] ?? null,
+                            'auth' => $apiResult['auth_used'] ?? null,
                         ];
                     } else {
                         $results[] = [
                             'type' => 'error',
                             'message' => $apiResult['message'] ?? 'Falha ao enviar fatura',
                             'reference' => (string) $key,
-                            'status_code' => $apiResult['status_code'] ?? 400
+                            'status_code' => $apiResult['status_code'] ?? 400,
+                            'endpoint' => $apiResult['endpoint_used'] ?? null,
+                            'auth' => $apiResult['auth_used'] ?? null,
                         ];
                     }
                 }
@@ -429,6 +436,36 @@ class UploadController extends Controller
             'customer_nif' => $this->getCell($first, $headerMap['customer_nif'] ?? null) ?: null,
             'date' => $this->getCell($first, $headerMap['date'] ?? null) ?: null,
             'notes' => $this->getCell($first, $headerMap['notes'] ?? null) ?: null,
+            'store_title' => $this->getCell($first, $headerMap['store_title'] ?? null) ?: null,
+            'register_title' => $this->getCell($first, $headerMap['register_title'] ?? null) ?: null,
+            'register_id' => $this->getCell($first, $headerMap['register_id'] ?? null) ?: null,
+            'store_id' => $this->getCell($first, $headerMap['store_id'] ?? null) ?: null,
+            'type' => $this->getCell($first, $headerMap['type'] ?? null) ?: null,
+            'discount_code' => $this->getCell($first, $headerMap['discount_code'] ?? null) ?: null,
+            'discount_amount' => $this->getCell($first, $headerMap['discount_amount'] ?? null) ?: null,
+            'discount_percentage' => $this->getCell($first, $headerMap['discount_percentage'] ?? null) ?: null,
+            'date_due' => $this->getCell($first, $headerMap['date_due'] ?? null) ?: null,
+            'mode' => $this->getCell($first, $headerMap['mode'] ?? null) ?: null,
+            'date_supply' => $this->getCell($first, $headerMap['date_supply'] ?? null) ?: null,
+            'ncr_id' => $this->getCell($first, $headerMap['ncr_id'] ?? null) ?: null,
+            'external_reference' => $this->getCell($first, $headerMap['external_reference'] ?? null) ?: null,
+            'stock_operation' => $this->getCell($first, $headerMap['stock_operation'] ?? null) ?: null,
+            'ifthenpay' => $this->getCell($first, $headerMap['ifthenpay'] ?? null) ?: null,
+            'eupago' => $this->getCell($first, $headerMap['eupago'] ?? null) ?: null,
+            'print_discount' => $this->getCell($first, $headerMap['print_discount'] ?? null) ?: null,
+            'output' => $this->getCell($first, $headerMap['output'] ?? null) ?: null,
+            'output_template_id' => $this->getCell($first, $headerMap['output_template_id'] ?? null) ?: null,
+            'tx_id' => $this->getCell($first, $headerMap['tx_id'] ?? null) ?: null,
+            'errors_full' => $this->getCell($first, $headerMap['errors_full'] ?? null) ?: null,
+            'rest_room' => $this->getCell($first, $headerMap['rest_room'] ?? null) ?: null,
+            'rest_table' => $this->getCell($first, $headerMap['rest_table'] ?? null) ?: null,
+            'occupation' => $this->getCell($first, $headerMap['occupation'] ?? null) ?: null,
+            'stamp_retention_amount' => $this->getCell($first, $headerMap['stamp_retention_amount'] ?? null) ?: null,
+            'irc_retention_id' => $this->getCell($first, $headerMap['irc_retention_id'] ?? null) ?: null,
+            'mgmAmount' => $this->getCell($first, $headerMap['mgmAmount'] ?? null) ?: null,
+            'related_document_id' => $this->getCell($first, $headerMap['related_document_id'] ?? null) ?: null,
+            'return_qrcode' => $this->getCell($first, $headerMap['return_qrcode'] ?? null) ?: null,
+            'doc_to_generate' => $this->getCell($first, $headerMap['doc_to_generate'] ?? null) ?: null,
         ];
 
         $items = [];
