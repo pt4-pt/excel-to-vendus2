@@ -376,7 +376,7 @@
                 <ul style="margin-left:18px;">
                     <li>Obrigatórios: mapeie pelo menos `reference` e `title`.</li>
                     <li>Preço: para produtos com variações, informe `price` por variação (será enviado em `prices[]`).</li>
-                    <li>Unidade (`unit_id`): se não mapear, eu resolvo automaticamente ou use `VENDUS_DEFAULT_UNIT_ID` no `.env`.</li>
+                    <li>Unidade (`unit_id`): obrigatório; mapeie uma coluna ou defina valor padrão no mapeamento.</li>
                     <li>Campos removidos: `stock_type`, `gross_price` (topo) e `supply_price` não são enviados.</li>
                     <li>Impostos: use `tax` (ID ou código). `tax_id` e isenções estão como obsoletos.</li>
                 </ul>

@@ -16,6 +16,7 @@ class VendusService
     private string $productsApiUrl;
     private string $documentsApiUrl;
     private string $apiUrl;
+    private static bool $firstPayloadLogged = false;
 
     public function __construct()
     {
@@ -57,9 +58,26 @@ class VendusService
     {
         $this->ensureProductsApiUrl();
 
+        Log::info("Payload JSON (create) para Vendus\nEndpoint: " . $this->productsApiUrl . "\n" .
+            json_encode($productData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        );
+
+        Log::info('Tentativa envio produto (v1.2)', [
+            'endpoint' => $this->productsApiUrl,
+            'auth' => 'Basic'
+        ]);
         $response = Http::withHeaders([
             'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
-        ])->post($this->productsApiUrl, $productData);
+        ])
+            ->timeout(30)
+            ->withOptions([
+                'verify' => false,
+                'curl' => [
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                ]
+            ])
+            ->post($this->productsApiUrl, $productData);
 
         if ($response->successful()) {
             $responseData = $response->json();
@@ -72,23 +90,70 @@ class VendusService
             return ['success' => false, 'message' => $errorMessage];
         }
 
+        Log::info('Tentativa envio produto (v1.2)', [
+            'endpoint' => $this->productsApiUrl,
+            'auth' => 'Bearer'
+        ]);
+        $response2 = Http::withToken($this->apiKey)
+            ->timeout(30)
+            ->withOptions([
+                'verify' => false,
+                'curl' => [
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                ]
+            ])
+            ->post($this->productsApiUrl, $productData);
+
+        if ($response2->successful()) {
+            $data2 = $response2->json();
+            if (isset($data2['id'])) {
+                return ['success' => true, 'data' => $data2];
+            }
+            Log::warning('Resposta 2xx sem ID de produto (Bearer)', ['response' => $data2]);
+            return ['success' => false, 'message' => 'Resposta 2xx sem ID de produto.'];
+        }
+
+        
+
         try {
-            $responseData = $response->json();
-            if ($response->status() === 400 && isset($responseData['errors'])) {
-                foreach ($responseData['errors'] as $error) {
-                    if (isset($error['code']) && $error['code'] === 'A001') {
-                        return $this->updateProductByReference($productData);
+            $contentType = $response->header('Content-Type') ?? '';
+            $json = null;
+            try { $json = $response->json(); } catch (\Throwable $t) { $json = null; }
+
+            if ($response->status() === 400 || $response->status() === 409) {
+                $errors = is_array($json) && isset($json['errors']) ? $json['errors'] : [];
+                $shouldUpdate = false;
+                foreach ((array)$errors as $error) {
+                    if (is_array($error)) {
+                        $code = $error['code'] ?? '';
+                        $msg = strtolower((string)($error['message'] ?? $error['detail'] ?? ''));
+                        if ($code === 'A001' || str_contains($msg, 'refer') || str_contains($msg, 'já existe')) {
+                            $shouldUpdate = true; break;
+                        }
                     }
+                }
+                if ($shouldUpdate) {
+                    return $this->updateProductByReference($productData);
                 }
             }
 
-            $errorMessage = 'Erro ao enviar produto para a Vendus API.';
-            Log::error($errorMessage, [
+            Log::error('Erro ao enviar produto para a Vendus API.', [
                 'status' => $response->status(),
-                'response' => $responseData,
+                'content_type' => $contentType,
+                'headers' => [
+                    'Location' => $response->header('Location'),
+                    'Content-Location' => $response->header('Content-Location'),
+                ],
+                'json' => $json,
+                'raw_body' => substr((string)$response->body(), 0, 2000),
                 'product_data' => $productData
             ]);
-            return ['success' => false, 'message' => $errorMessage, 'errors' => $responseData['errors'] ?? []];
+            return [
+                'success' => false,
+                'message' => 'Erro ao enviar produto para a Vendus API.',
+                'errors' => is_array($json) && isset($json['errors']) ? $json['errors'] : []
+            ];
         } catch (RequestException $e) {
             $errorMessage = 'Erro de comunicação ao enviar produto para a Vendus API.';
             Log::error($errorMessage, [
@@ -110,15 +175,48 @@ class VendusService
         $reference = $productData['reference'];
         $searchResponse = Http::withHeaders([
             'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
-        ])->get($this->productsApiUrl, ['reference' => $reference]);
+        ])
+            ->timeout(30)
+            ->withOptions([
+                'verify' => false,
+                'curl' => [
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                ]
+            ])
+            ->get($this->productsApiUrl, ['reference' => $reference]);
 
         if ($searchResponse->successful() && !empty($searchResponse->json())) {
             $existingProducts = $searchResponse->json();
             $productId = $existingProducts[0]['id']; // Pega o ID do primeiro produto encontrado
 
+            $updateUrl = $this->productsApiUrl . '/' . $productId;
             $updateResponse = Http::withHeaders([
                 'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
-            ])->put($this->productsApiUrl . '/' . $productId, $productData);
+            ])
+                ->timeout(30)
+                ->withOptions([
+                    'verify' => false,
+                    'curl' => [
+                        CURLOPT_SSL_VERIFYPEER => false,
+                        CURLOPT_SSL_VERIFYHOST => false,
+                    ]
+                ])
+                ->patch($updateUrl, $productData);
+
+            if (!$updateResponse->successful()) {
+                $updateResponse2 = Http::withToken($this->apiKey)
+                    ->timeout(30)
+                    ->withOptions([
+                        'verify' => false,
+                        'curl' => [
+                            CURLOPT_SSL_VERIFYPEER => false,
+                            CURLOPT_SSL_VERIFYHOST => false,
+                        ]
+                    ])
+                    ->patch($updateUrl, $productData);
+                $updateResponse = $updateResponse2;
+            }
 
             if ($updateResponse->successful()) {
                 return ['success' => true, 'data' => $updateResponse->json(), 'action' => 'updated'];
@@ -150,6 +248,395 @@ class VendusService
         if (str_ends_with($this->productsApiUrl, '/')) {
             $this->productsApiUrl = rtrim($this->productsApiUrl, '/');
         }
+        $this->productsApiUrl = $this->ensureProductsEndpoint($this->productsApiUrl);
+    }
+
+    public function getVariantSectionIdByTitle(string $title): ?int
+    {
+        $this->ensureProductsApiUrl();
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $url = $base . '/products/variants';
+        try {
+            $resp = Http::withBasicAuth($this->apiKey, '')
+                ->timeout(30)
+                ->withOptions(['verify' => false])
+                ->get($url);
+            if ($resp->successful()) {
+                $json = $resp->json();
+                $items = [];
+                if (is_array($json)) {
+                    if (isset($json['data']) && is_array($json['data'])) { $items = $json['data']; }
+                    elseif (isset($json['variants']) && is_array($json['variants'])) { $items = $json['variants']; }
+                    else { $items = $json; }
+                    $needle = $this->normalizeText($title);
+                    $found = null;
+                    foreach ($items as $item) {
+                        $t = $this->normalizeText((string)($item['title'] ?? ''));
+                        if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                    }
+                    if ($found === null) {
+                        foreach ($items as $item) {
+                            $t = $this->normalizeText((string)($item['title'] ?? ''));
+                            if ((str_contains($t, $needle) || str_contains($needle, $t)) && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                        }
+                    }
+                    if ($found !== null) { return $found; }
+                }
+            } else {
+                $resp2 = Http::withToken($this->apiKey)
+                    ->timeout(30)
+                    ->withOptions(['verify' => false])
+                    ->get($url);
+                if ($resp2->successful()) {
+                    $json2 = $resp2->json();
+                    $items = [];
+                    if (is_array($json2)) {
+                        if (isset($json2['data']) && is_array($json2['data'])) { $items = $json2['data']; }
+                        elseif (isset($json2['variants']) && is_array($json2['variants'])) { $items = $json2['variants']; }
+                        else { $items = $json2; }
+                        $needle = $this->normalizeText($title);
+                        $found = null;
+                        foreach ($items as $item) {
+                            $t = $this->normalizeText((string)($item['title'] ?? ''));
+                            if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                        }
+                        if ($found === null) {
+                            foreach ($items as $item) {
+                                $t = $this->normalizeText((string)($item['title'] ?? ''));
+                                if ((str_contains($t, $needle) || str_contains($needle, $t)) && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                            }
+                        }
+                        if ($found !== null) { return $found; }
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter variant sections', ['url' => $url, 'error' => $e->getMessage()]);
+        }
+        return null;
+    }
+
+    public function getVariantValuesForSection(int $sectionId): array
+    {
+        $this->ensureProductsApiUrl();
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $url = $base . '/products/variants';
+        try {
+            $resp = Http::withBasicAuth($this->apiKey, '')
+                ->timeout(30)
+                ->withOptions(['verify' => false])
+                ->get($url, ['parent_id' => $sectionId]);
+            if ($resp->successful()) {
+                $json = $resp->json();
+                $map = [];
+                $items = [];
+                if (is_array($json)) {
+                    if (isset($json['data']) && is_array($json['data'])) { $items = $json['data']; }
+                    elseif (isset($json['variants']) && is_array($json['variants'])) { $items = $json['variants']; }
+                    else { $items = $json; }
+                    foreach ($items as $item) {
+                        $text = (string) ($item['text'] ?? $item['title'] ?? '');
+                        if ($text !== '' && isset($item['id']) && is_numeric($item['id'])) {
+                            $map[$this->normalizeText($text)] = (int) $item['id'];
+                        }
+                    }
+                }
+                return $map;
+            } else {
+                $resp2 = Http::withToken($this->apiKey)
+                    ->timeout(30)
+                    ->withOptions(['verify' => false])
+                    ->get($url, ['parent_id' => $sectionId]);
+                if ($resp2->successful()) {
+                    $json2 = $resp2->json();
+                    $map = [];
+                    $items = [];
+                    if (is_array($json2)) {
+                        if (isset($json2['data']) && is_array($json2['data'])) { $items = $json2['data']; }
+                        elseif (isset($json2['variants']) && is_array($json2['variants'])) { $items = $json2['variants']; }
+                        else { $items = $json2; }
+                        foreach ($items as $item) {
+                            $text = (string) ($item['text'] ?? $item['title'] ?? '');
+                            if ($text !== '' && isset($item['id']) && is_numeric($item['id'])) {
+                                $map[$this->normalizeText($text)] = (int) $item['id'];
+                            }
+                        }
+                    }
+                    return $map;
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter variant values', ['url' => $url, 'error' => $e->getMessage()]);
+        }
+        return [];
+    }
+
+    private function normalizeText(string $text): string
+    {
+        $t = trim($text);
+        $t = mb_strtolower($t, 'UTF-8');
+        $t2 = @iconv('UTF-8', 'ASCII//TRANSLIT', $t);
+        if ($t2 !== false) { $t = $t2; }
+        $t = preg_replace('/\s+/', ' ', $t);
+        return $t;
+    }
+
+    private function getProductVariantsChildren(int $parentId): array
+    {
+        $this->ensureProductsApiUrl();
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $url = $base . '/products/variants';
+        try {
+            $resp = Http::withBasicAuth($this->apiKey, '')
+                ->timeout(30)
+                ->withOptions(['verify' => false])
+                ->get($url, ['parent_id' => $parentId]);
+            if ($resp->successful()) {
+                $json = $resp->json();
+                if (isset($json['data']) && is_array($json['data'])) return $json['data'];
+                if (isset($json['variants']) && is_array($json['variants'])) return $json['variants'];
+                if (is_array($json)) return $json;
+            } else {
+                $resp2 = Http::withToken($this->apiKey)
+                    ->timeout(30)
+                    ->withOptions(['verify' => false])
+                    ->get($url, ['parent_id' => $parentId]);
+                if ($resp2->successful()) {
+                    $json2 = $resp2->json();
+                    if (isset($json2['data']) && is_array($json2['data'])) return $json2['data'];
+                    if (isset($json2['variants']) && is_array($json2['variants'])) return $json2['variants'];
+                    if (is_array($json2)) return $json2;
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter filhos de variants', ['parent_id' => $parentId, 'error' => $e->getMessage()]);
+        }
+        return [];
+    }
+
+    private function getVariantChildSectionIdByTitle(int $parentId, string $title): ?int
+    {
+        $children = $this->getProductVariantsChildren($parentId);
+        $needle = $this->normalizeText($title);
+        foreach ($children as $item) {
+            $t = $this->normalizeText((string)($item['title'] ?? ''));
+            if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) return (int) $item['id'];
+        }
+        return null;
+    }
+
+    private function getVariantValueIdUnderParent(int $parentId, string $text): ?int
+    {
+        $children = $this->getProductVariantsChildren($parentId);
+        $needleRaw = trim((string)$text);
+        $needle = mb_strtolower($needleRaw, 'UTF-8');
+        foreach ($children as $item) {
+            $txtRaw = (string) ($item['text'] ?? $item['title'] ?? '');
+            $txt = mb_strtolower(trim($txtRaw), 'UTF-8');
+            if ($txt !== '' && $txt === $needle && isset($item['id']) && is_numeric($item['id'])) return (int) $item['id'];
+        }
+        $needleAlt = mb_strtolower(str_replace('-', '/', preg_replace('/\s+/', '', $needleRaw)), 'UTF-8');
+        foreach ($children as $item) {
+            $txtRaw = (string) ($item['text'] ?? $item['title'] ?? '');
+            $txtAlt = mb_strtolower(str_replace('-', '/', preg_replace('/\s+/', '', $txtRaw)), 'UTF-8');
+            if ($txtAlt !== '' && $txtAlt === $needleAlt && isset($item['id']) && is_numeric($item['id'])) return (int) $item['id'];
+        }
+        Log::warning('Variante não encontrada sob parent', ['parent_id' => $parentId, 'needle' => $needleRaw]);
+        return null;
+    }
+
+    private function getVariantsEndpoints(int $productId): array
+    {
+        $base = preg_replace('#/products$#', '', (string) $this->productsApiUrl);
+        $v12 = $base;
+        $v11 = preg_replace('#/v1\.2$#', '/v1.1', $v12);
+        $endpoints = [
+            $v12 . '/products/' . $productId,
+            $v11 . '/products/' . $productId
+        ];
+        return array_values(array_unique(array_filter($endpoints)));
+    }
+
+    private function buildVariantsPayload(string $title, array $items, bool $wrapped = true, ?int $variantId = null): array
+    {
+        $pvs = [];
+        foreach ($items as $it) {
+            $text = isset($it['variante']) ? (string) $it['variante'] : (isset($it['size']) ? (string) $it['size'] : (string) ($it['variant'] ?? ($it['variant_text'] ?? ($it['text'] ?? ''))));
+            $barcode = isset($it['upc_no']) ? (string) $it['upc_no'] : (string) ($it['barcode'] ?? '');
+            $code = isset($it['code']) ? (string) $it['code'] : '';
+            $priceVal = '0.00';
+            $pv = [
+                'text' => $text,
+                'barcode' => $barcode,
+                'code' => $code,
+                'price' => $priceVal
+            ];
+            if (isset($it['composite_id']) && is_numeric($it['composite_id'])) {
+                $pv['composite_ids'] = [ (string) $it['composite_id'] ];
+            }
+            $pvs[] = $pv;
+        }
+        $variant = ['title' => (string) $title];
+        if ($variantId !== null) { $variant['id'] = $variantId; }
+        $variantBlock = [
+            'variant' => $variant,
+            'product_variants' => $pvs
+        ];
+        if ($wrapped) {
+            return ['variants' => [$variantBlock]];
+        }
+        return $variantBlock;
+    }
+
+    private function normalizeVariantKey(string $text): string
+    {
+        return mb_strtolower(trim($text), 'UTF-8');
+    }
+
+    private function extractVariantIdFromResponse($data): ?int
+    {
+        if (is_array($data)) {
+            if (isset($data['id']) && is_numeric($data['id'])) {
+                return (int) $data['id'];
+            }
+            if (isset($data['variant_id']) && is_numeric($data['variant_id'])) {
+                return (int) $data['variant_id'];
+            }
+            if (isset($data['variants']) && is_array($data['variants'])) {
+                foreach ($data['variants'] as $block) {
+                    if (isset($block['variant']['id']) && is_numeric($block['variant']['id'])) {
+                        return (int) $block['variant']['id'];
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private function createOrLocateProduct(array $payload): array
+    {
+        $this->ensureProductsApiUrl();
+        $id = $this->findProductId($payload);
+        if ($id !== null) {
+            return ['success' => true, 'id' => $id, 'action' => 'found'];
+        }
+        $res = $this->sendProduct($payload);
+        if ($res['success']) {
+            $createdId = $res['data']['id'] ?? null;
+            if (is_numeric($createdId)) {
+                return ['success' => true, 'id' => (int) $createdId, 'action' => 'created'];
+            }
+        }
+        return ['success' => false, 'message' => $res['message'] ?? 'Falha ao criar produto', 'errors' => $res['errors'] ?? []];
+    }
+
+    public function attachVariantsToProduct(int $productId, string $title, array $items, ?int $sectionId = null): array
+    {
+        $payload = $this->buildVariantsPayload($title, $items, true, $sectionId);
+        if ($sectionId !== null) {
+            $payload['variant_id'] = (string) $sectionId;
+        }
+        $payload['class_id'] = 'MOD';
+        $update = $this->updateProduct($productId, $payload);
+        if ($update['success']) {
+            $vid = $sectionId;
+            return ['success' => true, 'data' => $update['data'], 'variant_id' => $vid];
+        }
+        return ['success' => false, 'message' => $update['message'] ?? 'Falha ao anexar variantes'];
+    }
+
+    public function createProductWithVariants(array $basePayload, string $variantTitle, array $variantItems): array
+    {
+        $sectionId = $this->getVariantSectionIdByTitle($variantTitle);
+        $sizeSectionId = $sectionId ? $this->getVariantChildSectionIdByTitle($sectionId, 'Size') : null;
+        if ($sectionId !== null && $sizeSectionId === null) {
+            $sizeSectionId = $this->getVariantChildSectionIdByTitle($sectionId, 'Tamanho');
+        }
+        $itemsWithComposite = [];
+        foreach ($variantItems as $it) {
+            $text = isset($it['variante']) ? (string) $it['variante'] : (isset($it['size']) ? (string) $it['size'] : (string) ($it['variant'] ?? ($it['variant_text'] ?? ($it['text'] ?? ''))));
+            $cid = null;
+            if ($sizeSectionId !== null) {
+                $cid = $this->getVariantValueIdUnderParent($sizeSectionId, $text);
+            }
+            $itm = $it;
+            if ($cid !== null) { $itm['composite_id'] = $cid; }
+            $itemsWithComposite[] = $itm;
+        }
+
+        $payload = $basePayload;
+        if ($sectionId !== null) {
+            $payload['variant_id'] = (string) $sectionId;
+        }
+        $payload['class_id'] = 'MOD';
+        $stores = [];
+        foreach ($itemsWithComposite as $it) {
+            $valueId = isset($it['composite_id']) ? (string) $it['composite_id'] : '';
+            if ($valueId !== '') {
+                $stores[] = [
+                    'id' => '292626436',
+                    'product_variant_id' => $valueId,
+                    'stock' => '10',
+                    'stock_alert' => '1'
+                ];
+            }
+        }
+        if (!empty($stores)) {
+            $payload['stock'] = ['control' => '1', 'type' => 'M', 'stores' => $stores];
+        }
+
+        $createResp = $this->sendProduct($payload);
+        
+        if ($createResp['success']) {
+            $createdId = $createResp['data']['id'] ?? null;
+            if (is_numeric($createdId)) {
+                $pid = (int) $createdId;
+                $data = $createResp['data'];
+                if ($sectionId !== null) {
+                    $updVid = $this->updateProduct($pid, ['variant_id' => (string)$sectionId, 'class_id' => 'MOD']);
+                    if ($updVid['success']) { $data['variant_id'] = (string)$sectionId; }
+                }
+                $this->attachVariantsToProduct($pid, $variantTitle, $itemsWithComposite, $sectionId);
+                return ['success' => true, 'data' => $data, 'action' => 'created'];
+            }
+            return ['success' => true, 'data' => $createResp['data'], 'action' => 'created'];
+        }
+
+        $productRes = $this->createOrLocateProduct($basePayload);
+        if (!$productRes['success']) {
+            return $productRes;
+        }
+        $productId = (int) $productRes['id'];
+        $patchPayload = [];
+        if ($sectionId !== null) {
+            $patchPayload['variant_id'] = (string) $sectionId;
+        }
+        $patchPayload['class_id'] = 'MOD';
+        $update = $this->updateProduct($productId, $patchPayload);
+        if ($update['success']) {
+            $this->attachVariantsToProduct($productId, $variantTitle, $itemsWithComposite, $sectionId);
+            $stores = [];
+            foreach ($itemsWithComposite as $it) {
+                $valueId = isset($it['composite_id']) ? (string) $it['composite_id'] : '';
+                if ($valueId !== '') {
+                    $stores[] = [
+                        'id' => '292626436',
+                        'product_variant_id' => $valueId,
+                        'stock' => '10',
+                        'stock_alert' => '0'
+                    ];
+                }
+            }
+            if (!empty($stores)) {
+                $patch = ['stock' => ['control' => '1', 'type' => 'M', 'stores' => $stores]];
+                $upd2 = $this->updateProduct($productId, $patch);
+                if (!$upd2['success']) {
+                    Log::warning('Falha ao atualizar stock por variantes (fallback)', ['product_id' => $productId, 'message' => $upd2['message'] ?? null]);
+                }
+            }
+            return ['success' => true, 'data' => ['product_id' => $productId, 'variant_id' => $sectionId], 'action' => $productRes['action']];
+        }
+        return ['success' => false, 'message' => $update['message'] ?? 'Falha ao atualizar produto com variant_id', 'id' => $productId];
     }
     /**
      * Envia um documento (PDF) para a API de Documentos da Vendus
@@ -692,6 +1179,9 @@ class VendusService
             if (isset($payload['reference'])) {
                 unset($payload['reference']);
             }
+            Log::info("Payload JSON (update) para Vendus\nEndpoint: " . $url . "\n" .
+                json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+            );
             $resp = Http::withToken($this->apiKey)
                 ->timeout(30)
                 ->withOptions([
@@ -805,6 +1295,26 @@ class VendusService
         return $clean . '/products';
     }
 
+    private function normalizeBoolean($value): bool
+    {
+        if (is_bool($value)) return $value;
+        if (is_null($value)) return false;
+        if (is_int($value)) return $value === 1;
+        if (is_string($value)) {
+            $v = strtolower(trim($value));
+            if ($v === '' ) return false;
+            $truthy = ['true','1','on','yes','sim'];
+            $falsy  = ['false','0','off','no','nao','não'];
+            if (in_array($v, $truthy, true)) return true;
+            if (in_array($v, $falsy, true)) return false;
+            // qualquer outra string não vazia: considerar verdadeiro?
+            // Para evitar erros, considerar falso se não reconhecido
+            return false;
+        }
+        return (bool)$value;
+    }
+
+
     /**
      * Constrói o payload do produto para a API do Vendus usando mapeamentos dinâmicos
      *
@@ -875,17 +1385,21 @@ class VendusService
             
             // Aplica conversão de tipo se necessário
             if ($value !== null) {
-                switch ($fieldType) {
-                    case 'number':
-                        $value = (int)$value;
-                        break;
-                    case 'boolean':
-                        $value = $value ? 'on' : 'off';
-                        break;
-                    case 'string':
-                    default:
-                        $value = (string)$value;
-                        break;
+                if ($vendusField === 'reference') {
+                    $value = (string)$value;
+                } else {
+                    switch ($fieldType) {
+                        case 'number':
+                            $value = (int)$value;
+                            break;
+                        case 'boolean':
+                            $value = $this->normalizeBoolean($value) ? 'true' : 'false';
+                            break;
+                        case 'string':
+                        default:
+                            $value = (string)$value;
+                            break;
+                    }
                 }
                 
                 if ($vendusField !== 'supply_price' && $vendusField !== 'gross_price' && $vendusField !== 'price') {
@@ -894,30 +1408,8 @@ class VendusService
             }
         }
         
-        // Garante que campos essenciais estejam presentes
-        // unit_id: v1.2 exige ID válido da sua conta. Resolver automaticamente se ausente ou inválido.
-        if (!isset($payload['unit_id']) || !is_numeric($payload['unit_id']) || (int)$payload['unit_id'] <= 0) {
-            $resolvedUnit = $this->getDefaultUnitId();
-            if ($resolvedUnit !== null) {
-                $payload['unit_id'] = $resolvedUnit;
-            }
-        } else {
-            // Normaliza para inteiro
-            $payload['unit_id'] = (int) $payload['unit_id'];
-        }
-        // Se veio um unit_id numérico porém não pertence às unidades da conta, tenta corrigir para o default
-        try {
-            $allowed = $this->getAllowedUnitIds();
-            if (!empty($allowed)) {
-                if (!isset($payload['unit_id']) || !in_array((int)$payload['unit_id'], $allowed, true)) {
-                    $fallback = $this->getDefaultUnitId();
-                    if ($fallback !== null && in_array($fallback, $allowed, true)) {
-                        $payload['unit_id'] = $fallback;
-                    }
-                }
-            }
-        } catch (\Exception $e) {
-            // Falha em obter lista de unidades não impede envio; API retornará erro mais claro
+        if (isset($payload['unit_id'])) {
+            $payload['unit_id'] = (string) $payload['unit_id'];
         }
         if (!isset($payload['status'])) {
             $payload['status'] = 'on';
@@ -935,44 +1427,95 @@ class VendusService
             $payload['barcode'] = (string) $productData['barcode'];
         }
 
-        $prices = [];
-        // Prioriza gross_price do variant/produto
+        $pricesObj = [];
+        $supply = null;
+        if (isset($productData['supply']) || isset($productData['supply_price'])) {
+            $supply = isset($productData['supply']) ? $productData['supply'] : $productData['supply_price'];
+            $supply = number_format((float) $supply, 2, '.', '');
+        }
         $gross = null;
-        if (isset($productData['gross_price'])) {
+        if (isset($productData['gross'])) {
+            $gross = number_format((float) $productData['gross'], 2, '.', '');
+        } elseif (isset($productData['gross_price'])) {
             $gross = number_format((float) $productData['gross_price'], 2, '.', '');
-        } elseif (isset($productData['price'])) { // alguns dados de variação usam 'price'
+        } elseif (isset($productData['price'])) {
             $gross = number_format((float) $productData['price'], 2, '.', '');
         }
-        if ($gross !== null) {
-            $priceEntry = ['gross_price' => $gross];
-            $groupId = env('VENDUS_PRICE_GROUP_ID');
-            if ($groupId !== null && $groupId !== '' && is_numeric($groupId)) {
-                $priceEntry['id'] = (int) $groupId;
-            }
-            $prices[] = $priceEntry;
+        if ($supply !== null) {
+            $pricesObj['supply'] = (string) $supply;
         }
-        if (!empty($prices)) {
-            $payload['prices'] = $prices;
-        }
-        // Fallback: também define preço no campo de topo, para compatibilidade
         if ($gross !== null) {
-            $payload['price'] = $gross;
+            $pricesObj['gross'] = (string) $gross;
+        }
+        $groupId = isset($productData['price_group_id']) ? $productData['price_group_id'] : null;
+        $groupGross = isset($productData['price_group_gross']) ? $productData['price_group_gross'] : null;
+        if ($groupId !== null && $groupId !== '' && $groupGross !== null && $groupGross !== '') {
+            $pricesObj['groups'] = [
+                [
+                    'id' => (string) $groupId,
+                    'gross' => (string) number_format((float) $groupGross, 2, '.', ''),
+                ]
+            ];
+        }
+        if (!empty($pricesObj)) {
+            $payload['prices'] = $pricesObj;
         }
         unset($payload['supply_price']);
         unset($payload['gross_price']);
         unset($payload['stock_type']);
 
         // Converte possíveis campos antigos para os atuais
-        if (isset($payload['tax_id']) && !isset($payload['tax'])) {
-            $payload['tax'] = $payload['tax_id'];
-            unset($payload['tax_id']);
+        $taxObj = [];
+        if (isset($productData['tax_id']) && $productData['tax_id'] !== '') {
+            $taxObj['id'] = (string) $productData['tax_id'];
+        }
+        if (isset($productData['tax_exemption']) && $productData['tax_exemption'] !== '') {
+            $taxObj['exemption'] = (string) $productData['tax_exemption'];
+        }
+        if (isset($productData['tax_exemption_law']) && $productData['tax_exemption_law'] !== '') {
+            $taxObj['exemption_law'] = (string) $productData['tax_exemption_law'];
+        }
+        if (!empty($taxObj)) {
+            $payload['tax'] = $taxObj;
+        }
+
+        $stockObj = [];
+        if (isset($productData['stock_control']) && $productData['stock_control'] !== '') {
+            $stockObj['control'] = (string) $productData['stock_control'];
+        }
+        if (isset($productData['stock_type']) && $productData['stock_type'] !== '') {
+            $stockObj['type'] = (string) $productData['stock_type'];
+        }
+        $storeId = $productData['stock_store_id'] ?? null;
+        $pvId = $productData['product_variant_id'] ?? null;
+        $stockQty = $productData['stock_stock'] ?? null;
+        $stockAlert = $productData['stock_stock_alert'] ?? null;
+        if ($storeId !== null || $pvId !== null || $stockQty !== null || $stockAlert !== null) {
+            $entry = [];
+            if ($storeId !== null) $entry['store_id'] = (string) $storeId;
+            if ($pvId !== null) $entry['product_variant_id'] = (string) $pvId;
+            if ($stockQty !== null) $entry['stock'] = (string) number_format((float) $stockQty, 2, '.', '');
+            if ($stockAlert !== null) $entry['stock_alert'] = (string) number_format((float) $stockAlert, 2, '.', '');
+            $stockObj['stores'] = [$entry];
+        }
+        if (!empty($stockObj)) {
+            $payload['stock'] = $stockObj;
+        }
+
+        if (isset($productData['lot_control'])) {
+            $payload['lot_control'] = (string) $productData['lot_control'];
+        }
+
+        // 'stores' é opcional; incluir apenas quando houver dados
+        if (!isset($payload['stores'])) {
+            // não definir stores vazio para evitar serialização estranha
         }
 
         // Whitelist de campos permitidos em v1.2 (observado via respostas da API)
         $allowed = [
             'reference','barcode','supplier_code','title','description','include_description',
             'unit_id','type_id','variant_id','class_id','prices','stock','tax','lot_control',
-            'category_id','brand_id','image','status','stores'
+            'category_id','brand_id','image','status','stores','variants','modifiers'
         ];
         foreach (array_keys($payload) as $key) {
             if (!in_array($key, $allowed, true)) {
@@ -993,83 +1536,31 @@ class VendusService
     {
         $errors = [];
 
-        $requiredFields = ['reference', 'title'];
-        
-        foreach ($requiredFields as $field) {
-            if (empty($data[$field])) {
-                $errors[] = "Campo obrigatório '{$field}' está vazio";
-            }
+        if (empty($data['title'])) {
+            $errors[] = "Campo obrigatório 'title' está vazio";
+        }
+        if (empty($data['unit_id'])) {
+            $errors[] = "Campo obrigatório 'unit_id' está vazio";
         }
 
-        if (empty($data['prices'])) {
-            $hasVariants = !empty($data['variants']) && is_array($data['variants']);
-            if (!$hasVariants) {
-                if (empty($data['gross_price']) && empty($data['price'])) {
-                    $errors[] = "Preço de venda (prices[].gross_price) está vazio";
-                } elseif (!empty($data['gross_price']) && !is_numeric($data['gross_price'])) {
-                    $errors[] = "Preço de venda deve ser numérico";
-                } elseif (!empty($data['price']) && !is_numeric($data['price'])) {
-                    $errors[] = "Preço de venda deve ser numérico";
+        if (isset($data['prices']) && is_array($data['prices'])) {
+            if (isset($data['prices']['gross']) && $data['prices']['gross'] !== '') {
+                $g = $data['prices']['gross'];
+                if (!is_numeric($g)) {
+                    $errors[] = "prices.gross deve ser numérico";
                 }
             }
-        } else {
-            foreach ($data['prices'] as $idx => $p) {
-                if (empty($p['gross_price'])) {
-                    $errors[] = "prices[{$idx}].gross_price é obrigatório";
-                } elseif (!is_numeric($p['gross_price'])) {
-                    $errors[] = "prices[{$idx}].gross_price deve ser numérico";
+            if (isset($data['prices']['supply']) && $data['prices']['supply'] !== '') {
+                $s = $data['prices']['supply'];
+                if (!is_numeric($s)) {
+                    $errors[] = "prices.supply deve ser numérico";
                 }
             }
-        }
-
-        $mappingDefaultUnit = null;
-        try {
-            $unitMapping = FieldMapping::getByVendusField('unit_id');
-            if ($unitMapping && $unitMapping->default_value !== null && $unitMapping->default_value !== '' && is_numeric($unitMapping->default_value)) {
-                $mappingDefaultUnit = (int) $unitMapping->default_value;
-            }
-        } catch (Exception $e) {
-        }
-
-        $allowedUnits = [];
-        try {
-            $allowedUnits = $this->getAllowedUnitIds();
-        } catch (\Exception $e) {
-        }
-
-        if (isset($data['unit_id']) && $data['unit_id'] !== '') {
-            if (!is_numeric($data['unit_id'])) {
-                $errors[] = "unit_id deve ser numérico";
-            } else {
-                $unitVal = (int) $data['unit_id'];
-                if (!empty($allowedUnits) && !in_array($unitVal, $allowedUnits, true)) {
-                    $errors[] = "unit_id inválido: o valor não pertence às suas Unidades Vendus";
-                }
-            }
-        } else {
-            $resolvedUnit = $mappingDefaultUnit ?? $this->getDefaultUnitId();
-            if ($resolvedUnit === null) {
-                $errors[] = "Unidade (unit_id) não configurada. Configure o mapeamento 'Unidade' (valor padrão numérico) ou defina VENDUS_DEFAULT_UNIT_ID no .env";
-            } elseif (!empty($allowedUnits) && !in_array($resolvedUnit, $allowedUnits, true)) {
-                $errors[] = "unit_id padrão inválido: o valor do mapeamento/ENV não pertence às suas Unidades Vendus";
-            }
-        }
-
-        if (!empty($data['variants'])) {
-            foreach ($data['variants'] as $index => $variant) {
-                if (empty($variant['size'])) {
-                    $errors[] = "Variante {$index}: campo 'size' é obrigatório";
-                }
-                if (empty($variant['upc_no'])) {
-                    $errors[] = "Variante {$index}: campo 'upc_no' é obrigatório";
-                }
-                if (empty($variant['code'])) {
-                    $errors[] = "Variante {$index}: campo 'code' é obrigatório";
-                }
-                if (!isset($variant['price']) || $variant['price'] === '') {
-                    $errors[] = "Variante {$index}: campo 'price' é obrigatório";
-                } elseif (!is_numeric($variant['price'])) {
-                    $errors[] = "Variante {$index}: campo 'price' deve ser numérico";
+            if (isset($data['prices']['groups']) && is_array($data['prices']['groups'])) {
+                foreach ($data['prices']['groups'] as $idx => $grp) {
+                    if (isset($grp['gross']) && $grp['gross'] !== '' && !is_numeric($grp['gross'])) {
+                        $errors[] = "prices.groups[{$idx}].gross deve ser numérico";
+                    }
                 }
             }
         }

@@ -6,6 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 
 class FieldMapping extends Model
 {
+    private static array $ALLOWED_V12_FIELDS = [
+        'reference','barcode','supplier_code','title','description','include_description',
+        'unit_id','type_id','variant_id','class_id','prices','stock','tax','lot_control',
+        'category_id','brand_id','image','status','stores',
+        'price','supply','price_group_id','price_group_gross',
+        'stock_control','stock_type','stock_store_id','product_variant_id','stock_stock','stock_stock_alert',
+        'tax_id','tax_exemption','tax_exemption_law'
+    ];
     protected $fillable = [
         'vendus_field',
         'vendus_field_label',
@@ -22,12 +30,15 @@ class FieldMapping extends Model
         'is_active' => 'boolean',
     ];
 
+
     /**
      * Obtém todos os mapeamentos ativos
      */
     public static function getActiveMappings()
     {
-        return self::where('is_active', true)->get();
+        return self::where('is_active', true)
+            ->whereIn('vendus_field', self::$ALLOWED_V12_FIELDS)
+            ->get();
     }
 
     /**
@@ -37,6 +48,7 @@ class FieldMapping extends Model
     {
         return self::where('vendus_field', $field)
                    ->where('is_active', true)
+                   ->whereIn('vendus_field', self::$ALLOWED_V12_FIELDS)
                    ->first();
     }
 
@@ -57,7 +69,7 @@ class FieldMapping extends Model
     public static function getMappedFields()
     {
         return self::where('is_active', true)
-                   ->whereNotNull('excel_column')
+                   ->whereIn('vendus_field', self::$ALLOWED_V12_FIELDS)
                    ->get();
     }
 
@@ -78,30 +90,21 @@ class FieldMapping extends Model
             ],
             [
                 'vendus_field' => 'price',
-                'vendus_field_label' => 'Preço (venda)',
+                'vendus_field_label' => 'Preço (venda) (prices.gross)',
                 'excel_column' => null,
                 'field_type' => 'number',
                 'is_required' => true,
-                'description' => 'Preço por variação; usado para construir prices[] (API v1.2)'
+                'description' => 'Usado para construir prices.gross'
             ],
             [
-                'vendus_field' => 'supply_price',
-                'vendus_field_label' => 'Preço de Custo (obsoleto)',
+                'vendus_field' => 'supply',
+                'vendus_field_label' => 'Preço de Custo (prices.supply)',
                 'excel_column' => null,
                 'field_type' => 'number',
                 'is_required' => false,
-                'is_active' => false,
-                'description' => 'Removido do payload de criação em v1.2'
+                'description' => 'Usado para construir prices.supply'
             ],
-            [
-                'vendus_field' => 'gross_price',
-                'vendus_field_label' => 'Preço Bruto (obsoleto)',
-                'excel_column' => null,
-                'field_type' => 'number',
-                'is_required' => false,
-                'is_active' => false,
-                'description' => 'Agora deve ser enviado em prices[] na API v1.2'
-            ],
+            
             [
                 'vendus_field' => 'unit_id',
                 'vendus_field_label' => 'Unidade',
@@ -210,27 +213,95 @@ class FieldMapping extends Model
                 'default_value' => 'false',
                 'description' => 'Se o produto tem controle de lote (true/false)'
             ],
+
             [
                 'vendus_field' => 'stock_control',
-                'vendus_field_label' => 'Controle de Estoque',
+                'vendus_field_label' => 'Stock - Control',
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'is_active' => false,
-                'default_value' => null,
-                'description' => 'Obsoleto em v1.2: campo não permitido pela API'
+                'description' => 'Usado para construir stock.control'
             ],
             [
                 'vendus_field' => 'stock_type',
-                'vendus_field_label' => 'Tipo de Estoque',
+                'vendus_field_label' => 'Stock - Type',
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
-                'is_active' => false,
-                'default_value' => null,
-                'description' => 'Obsoleto em v1.2: campo não permitido pela API'
+                'description' => 'Usado para construir stock.type'
             ],
-            
+            [
+                'vendus_field' => 'stock_store_id',
+                'vendus_field_label' => 'Stock - Store ID',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'description' => 'Usado para construir stock.stores[].id'
+            ],
+            [
+                'vendus_field' => 'product_variant_id',
+                'vendus_field_label' => 'Stock - Product Variant ID',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'description' => 'Usado para construir stock.stores[].product_variant_id'
+            ],
+            [
+                'vendus_field' => 'stock_stock',
+                'vendus_field_label' => 'Stock - Quantidade',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'description' => 'Usado para construir stock.stores[].stock'
+            ],
+            [
+                'vendus_field' => 'stock_stock_alert',
+                'vendus_field_label' => 'Stock - Alerta',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'description' => 'Usado para construir stock.stores[].stock_alert'
+            ],
+            [
+                'vendus_field' => 'price_group_id',
+                'vendus_field_label' => 'Grupo de Preço - ID',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'description' => 'Usado para construir prices.groups[].id'
+            ],
+            [
+                'vendus_field' => 'price_group_gross',
+                'vendus_field_label' => 'Grupo de Preço - Preço',
+                'excel_column' => null,
+                'field_type' => 'number',
+                'is_required' => false,
+                'description' => 'Usado para construir prices.groups[].gross'
+            ],
+            [
+                'vendus_field' => 'tax_id',
+                'vendus_field_label' => 'Imposto - ID',
+                'excel_column' => null,
+                'field_type' => 'string',
+                'is_required' => false,
+                'description' => 'Usado para construir tax.id'
+            ],
+            [
+                'vendus_field' => 'tax_exemption',
+                'vendus_field_label' => 'Imposto - Isenção',
+                'excel_column' => null,
+                'field_type' => 'string',
+                'is_required' => false,
+                'description' => 'Usado para construir tax.exemption'
+            ],
+            [
+                'vendus_field' => 'tax_exemption_law',
+                'vendus_field_label' => 'Imposto - Lei de Isenção',
+                'excel_column' => null,
+                'field_type' => 'string',
+                'is_required' => false,
+                'description' => 'Usado para construir tax.exemption_law'
+            ],
             // Campos fiscais
             [
                 'vendus_field' => 'tax',
@@ -240,33 +311,7 @@ class FieldMapping extends Model
                 'is_required' => false,
                 'description' => 'Taxa aplicável ao produto (ID ou código)'
             ],
-            [
-                'vendus_field' => 'tax_id',
-                'vendus_field_label' => 'Taxa (obsoleto)',
-                'excel_column' => null,
-                'field_type' => 'string',
-                'is_required' => false,
-                'is_active' => false,
-                'description' => 'Obsoleto em v1.2: use "tax"'
-            ],
-            [
-                'vendus_field' => 'tax_exemption',
-                'vendus_field_label' => 'Isenção Fiscal (obsoleto)',
-                'excel_column' => null,
-                'field_type' => 'string',
-                'is_required' => false,
-                'is_active' => false,
-                'description' => 'Obsoleto em v1.2'
-            ],
-            [
-                'vendus_field' => 'tax_exemption_law',
-                'vendus_field_label' => 'Lei de Isenção (obsoleto)',
-                'excel_column' => null,
-                'field_type' => 'string',
-                'is_required' => false,
-                'is_active' => false,
-                'description' => 'Obsoleto em v1.2'
-            ],
+            
             
             // Campo de imagem
             [

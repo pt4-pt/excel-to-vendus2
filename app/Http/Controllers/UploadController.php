@@ -171,11 +171,12 @@ class UploadController extends Controller
 
                 $processedReferences[] = $reference;
 
-                // Constrói os dados do produto
+                // Constrói os dados do produto e o payload conforme v1.2
                 $productData = $this->buildProductData($productRows, $headerMap);
+                $payloadBase = $this->vendusService->buildProductPayload($productData);
                 
-                // Valida os dados
-                $validation = $this->vendusService->validateProductData($productData);
+                // Valida o payload (title, unit_id, prices, etc.)
+                $validation = $this->vendusService->validateProductData($payloadBase);
                 
                 if (!$validation['valid']) {
                     $results[] = [
@@ -186,108 +187,29 @@ class UploadController extends Controller
                     continue;
                 }
 
-                // Como a API nao suporta variants, enviamos cada variacao como produto separado
-                // mas com nomenclatura melhorada para identificar que sao variacoes
-                $variantCount = 0;
-                $successCount = 0;
-                $errorMessages = [];
-
-                // Se ha apenas uma variacao, envia como produto principal
-                if (count($productData['variants']) == 1) {
-                    $variant = $productData['variants'][0];
-                    $variantCount = 1;
-                    
-                    $variantProductData = [
-                        'reference' => $productData['reference'], // Usa a referencia original
-                        'title' => $productData['title'],
-                        'price' => $variant['price'],
-                        'barcode' => $variant['upc_no'], // Adiciona codigo de barras
-                        'variants' => []
-                    ];
-                    
-                    // Pré-validação para mensagens mais claras antes de enviar
-                    $validation = $this->vendusService->validateProductData($variantProductData);
-                    if (!$validation['valid']) {
-                        $errorMessages[] = 'Produto único inválido: ' . implode('; ', $validation['errors']);
-                    } else {
-                        $payload = $this->vendusService->buildProductPayload($variantProductData);
-                        $apiResult = $this->vendusService->sendProduct($payload);
-                    }
-                    
-                    if ($apiResult['success']) {
-                        $successCount = 1;
-                    } else {
-                        $errorMessages[] = "Produto unico: {$apiResult['message']}";
-                    }
-                } else {
-                    // Multiplas variacoes - envia cada uma com nomenclatura clara
-                    foreach ($productData['variants'] as $index => $variant) {
-                        $variantCount++;
-                        
-                        // Nomenclatura melhorada: [Produto] - Tamanho [X] (Var. Y/Z)
-                        // Remove tamanho original entre parêntesis do nome base, se existir
-                        $baseTitle = preg_replace('/\s*\([^)]+\)\s*$/', '', $productData['title']);
-                        $variantTitle = $baseTitle . ' - Tamanho ' . $variant['size'];
-                        if (count($productData['variants']) > 1) {
-                            $variantTitle .= ' (Var. ' . ($index + 1) . '/' . count($productData['variants']) . ')';
-                        }
-                        
-                        $variantProductData = [
-                            'reference' => $variant['code'], // Codigo unico da variacao
-                            'title' => $variantTitle,
-                            'price' => $variant['price'],
-                            'barcode' => $variant['upc_no'], // Codigo de barras da variacao
-                            'description' => "Variacao de tamanho {$variant['size']} do produto {$productData['title']}",
-                            'variants' => []
-                        ];
-                        
-                        // Pré-validação para mensagens mais claras antes de enviar
-                        $validation = $this->vendusService->validateProductData($variantProductData);
-                        if (!$validation['valid']) {
-                            $errorMessages[] = "Variacao {$variant['size']} (#" . ($index + 1) . ") inválida: " . implode('; ', $validation['errors']);
-                            $apiResult = ['success' => false];
-                        } else {
-                            $payload = $this->vendusService->buildProductPayload($variantProductData);
-                            $apiResult = $this->vendusService->sendProduct($payload);
-                        }
-                        
-                        if ($apiResult['success']) {
-                            $successCount++;
-                        } else {
-                            $errorMessages[] = "Variacao " . $variant['size'] . " (#" . ($index + 1) . "): " . $apiResult['message'];
-                        }
-                    }
+                $variantItems = $productData['variants'];
+                $variantCount = count($variantItems);
+                $basePrice = $variantCount > 0 ? (float) ($variantItems[0]['price'] ?? 0) : (float) 0;
+                if (!isset($payloadBase['prices'])) {
+                    $payloadBase['prices'] = [];
                 }
-
-                // Resultado consolidado com mensagens melhoradas
-                if ($successCount == $variantCount) {
-                    if ($variantCount == 1) {
-                        $results[] = [
-                            'type' => 'success',
-                            'reference' => $reference,
-                            'message' => "Produto enviado com sucesso",
-                            'variants_count' => $variantCount
-                        ];
-                    } else {
-                        $results[] = [
-                            'type' => 'success',
-                            'reference' => $reference,
-                            'message' => "Produto com {$variantCount} variacoes enviado com sucesso",
-                            'variants_count' => $variantCount
-                        ];
-                    }
-                } elseif ($successCount > 0) {
+                if (!isset($payloadBase['prices']['gross'])) {
+                    $payloadBase['prices']['gross'] = (string) number_format($basePrice, 2, '.', '');
+                }
+                $variantTitle = isset($productData['variant_title']) && $productData['variant_title'] !== '' ? (string) $productData['variant_title'] : 'Size';
+                $res = $this->vendusService->createProductWithVariants($payloadBase, $variantTitle, $variantItems);
+                if ($res['success']) {
                     $results[] = [
-                        'type' => 'partial',
+                        'type' => 'success',
                         'reference' => $reference,
-                        'message' => "Produto parcialmente enviado: {$successCount}/{$variantCount} variacoes. Erros: " . implode('; ', $errorMessages),
+                        'message' => "Produto com {$variantCount} variacoes enviado com sucesso",
                         'variants_count' => $variantCount
                     ];
                 } else {
                     $results[] = [
                         'type' => 'error',
                         'reference' => $reference,
-                        'message' => "Falha ao enviar produto com {$variantCount} variacoes. Erros: " . implode('; ', $errorMessages),
+                        'message' => $res['message'] ?? 'Falha ao enviar produto com variantes',
                         'variants_count' => $variantCount
                     ];
                 }
@@ -563,43 +485,63 @@ class UploadController extends Controller
      */
     private function mapHeaders(array $header): array|false
     {
-        // v1.2: exige apenas identificadores básicos e preço (PVP). Categoria e custo são opcionais.
-        $requiredHeaders = [
-            'ref_vendus' => ['Ref. Vendus', 'ref. vendus', 'ref_vendus'],
-            'nome' => ['Nome', 'nome', 'name', 'Name'],
-            'size' => ['Size', 'size', 'tamanho', 'Tamanho'],
-            'upc_no' => ['UPC No.', 'upc no.', 'upc_no', 'UPC', 'barcode'],
-            'pvp' => ['PVP', 'pvp', 'preço', 'Preço', 'price']
+        $normalize = function (string $v): string {
+            $v = trim($v);
+            $v = mb_strtolower($v, 'UTF-8');
+            $v = iconv('UTF-8', 'ASCII//TRANSLIT', $v);
+            $v = preg_replace('/[\._\-\/:]/', ' ', $v);
+            $v = preg_replace('/\s+/', ' ', $v);
+            $v = preg_replace('/[^a-z0-9 ]+/', '', $v);
+            return trim($v);
+        };
+
+        $normalizedHeaders = [];
+        foreach ($header as $i => $h) {
+            $normalizedHeaders[$i] = $normalize((string) $h);
+        }
+
+        $requiredSyns = [
+            'ref_vendus' => ['ref vendus','refvendus','referencia','referencia vendus','ref'],
+            'nome' => ['nome','name','titulo','title','produto'],
+            'size' => ['size','tamanho','variante','variant'],
+            'upc_no' => ['upc no','upc','barcode','ean','ean13','codigo barras','codigo de barras'],
+            'pvp' => ['pvp','preco','preco venda','preco de venda','preco unitario','preco pvp','preco preco']
         ];
 
-        $optionalHeaders = [
-            'cat' => ['Cat', 'cat', 'categoria', 'Categoria'],
-            'cost' => ['Cost', 'cost', 'custo', 'Custo']
+        $optionalSyns = [
+            'cat' => ['cat','categoria'],
+            'cost' => ['cost','custo'],
+            'tipo_variacao' => ['tipo variacao','tipo de variacao','variation type','variant type'],
+            'store_id' => ['loja id','store id','id loja','loja'],
+            'stock' => ['stock','quantidade','qty'],
+            'stock_alert' => ['stock alert','alerta stock','alerta']
         ];
 
         $headerMap = [];
 
-        // Mapear obrigatórios
-        foreach ($requiredHeaders as $key => $variations) {
-            $found = false;
-            foreach ($header as $index => $headerValue) {
-                if (in_array(trim($headerValue), $variations)) {
-                    $headerMap[$key] = $index;
-                    $found = true;
-                    break;
+        foreach ($requiredSyns as $key => $syns) {
+            $foundIdx = null;
+            $synsNorm = array_map($normalize, $syns);
+            foreach ($normalizedHeaders as $idx => $hn) {
+                if (in_array($hn, $synsNorm, true)) { $foundIdx = $idx; break; }
+            }
+            if ($foundIdx === null) {
+                foreach ($normalizedHeaders as $idx => $hn) {
+                    foreach ($synsNorm as $s) { if ($s !== '' && str_contains($hn, $s)) { $foundIdx = $idx; break 2; } }
                 }
             }
-            if (!$found) {
-                return false; // Cabeçalho obrigatório não encontrado
-            }
+            if ($foundIdx === null) { return false; }
+            $headerMap[$key] = $foundIdx;
         }
 
-        // Mapear opcionais, se existirem
-        foreach ($optionalHeaders as $key => $variations) {
-            foreach ($header as $index => $headerValue) {
-                if (in_array(trim($headerValue), $variations)) {
-                    $headerMap[$key] = $index;
-                    break;
+        foreach ($optionalSyns as $key => $syns) {
+            $synsNorm = array_map($normalize, $syns);
+            foreach ($normalizedHeaders as $idx => $hn) {
+                if (in_array($hn, $synsNorm, true)) { $headerMap[$key] = $idx; break; }
+            }
+            if (!isset($headerMap[$key])) {
+                foreach ($normalizedHeaders as $idx => $hn) {
+                    foreach ($synsNorm as $s) { if ($s !== '' && str_contains($hn, $s)) { $headerMap[$key] = $idx; break 2; } }
                 }
             }
         }
@@ -617,21 +559,26 @@ class UploadController extends Controller
     private function groupProductsByReference(array $rows, array $headerMap): array
     {
         $grouped = [];
-
         foreach ($rows as $row) {
-            $reference = trim($row[$headerMap['ref_vendus']] ?? '');
-            
-            if (empty($reference)) {
-                continue; // Ignora linhas sem referência
+            $ref = trim((string)($row[$headerMap['ref_vendus']] ?? ''));
+            $name = trim((string)($row[$headerMap['nome']] ?? ''));
+            if ($ref === '' && $name === '') { continue; }
+            $sz = trim((string)($row[$headerMap['size']] ?? ''));
+            $baseRef = $ref;
+            $baseName = $name;
+            if ($sz !== '') {
+                $s = preg_quote($sz, '/');
+                $baseRef = preg_replace('/(\.|-|_|\s)'.$s.'$/i', '', $baseRef);
+                $baseRef = preg_replace('/\s*\(\s*'.$s.'\s*\)\s*$/i', '', $baseRef);
+                $baseName = preg_replace('/\s*-\s*Tamanho\s*'.$s.'\s*$/i', '', $baseName);
+                $baseName = preg_replace('/\s*\(\s*'.$s.'\s*\)\s*$/i', '', $baseName);
             }
-
-            if (!isset($grouped[$reference])) {
-                $grouped[$reference] = [];
-            }
-
-            $grouped[$reference][] = $row;
+            if (strpos($ref, '.') !== false) { $baseRef = substr($ref, 0, strpos($ref, '.')); }
+            $key = trim($baseRef) !== '' ? trim($baseRef) : trim($baseName);
+            if ($key === '') { $key = $ref ?: $name; }
+            if (!isset($grouped[$key])) { $grouped[$key] = []; }
+            $grouped[$key][] = $row;
         }
-
         return $grouped;
     }
 
@@ -645,25 +592,51 @@ class UploadController extends Controller
     private function buildProductData(array $productRows, array $headerMap): array
     {
         $firstRow = $productRows[0];
-        
+        $rawRef = trim((string)($firstRow[$headerMap['ref_vendus']] ?? ''));
+        $base = $rawRef;
+        if (strpos($base, '.') !== false) {
+            $base = substr($base, 0, strpos($base, '.'));
+        }
         $productData = [
-            'reference' => trim($firstRow[$headerMap['ref_vendus']]),
-            'title' => trim($firstRow[$headerMap['nome']]),
+            'reference' => $base,
+            'title' => trim((string)$firstRow[$headerMap['nome']]),
             'variants' => []
         ];
+        if (isset($headerMap['tipo_variacao'])) {
+            $vt = '';
+            foreach ($productRows as $r) {
+                $v = trim((string)($r[$headerMap['tipo_variacao']] ?? ''));
+                if ($v !== '') { $vt = $v; break; }
+            }
+            if ($vt !== '') {
+                $parts = preg_split('/\s+/', $vt);
+                $cut = count($parts);
+                for ($i = 0; $i < count($parts); $i++) { if (str_contains($parts[$i], '/')) { $cut = $i; break; } }
+                if ($cut < count($parts)) { $vt = trim(implode(' ', array_slice($parts, 0, $cut))); }
+                $productData['variant_title'] = $vt;
+            }
+        }
 
         // Adiciona as variantes
         foreach ($productRows as $row) {
             $size = trim($row[$headerMap['size']] ?? '');
             $upcNo = trim($row[$headerMap['upc_no']] ?? '');
             $price = $this->parsePrice($row[$headerMap['pvp']]);
+            $storeId = isset($headerMap['store_id']) ? trim((string)($row[$headerMap['store_id']] ?? '')) : '';
+            $stockQty = isset($headerMap['stock']) ? (string) ($row[$headerMap['stock']] ?? '') : '';
+            $stockAlert = isset($headerMap['stock_alert']) ? (string) ($row[$headerMap['stock_alert']] ?? '') : '';
 
-            if (!empty($size) && !empty($upcNo)) {
+            if ($size !== '' && $upcNo !== '') {
+                $rowRef = trim((string)($row[$headerMap['ref_vendus']] ?? ''));
+                $code = $rowRef !== '' ? $rowRef : ($productData['reference'] . '.' . str_replace('/', '-', $size));
                 $productData['variants'][] = [
                     'size' => $size,
                     'upc_no' => $upcNo,
-                    'code' => $productData['reference'] . '-' . $size,
-                    'price' => $price
+                    'code' => $code,
+                    'price' => $price,
+                    'store_id' => $storeId,
+                    'stock' => $stockQty,
+                    'stock_alert' => $stockAlert
                 ];
             }
         }
