@@ -35,7 +35,7 @@ class VendusService
         }
         // Já é um código válido
         $asStr = is_string($tax) ? strtoupper(trim($tax)) : null;
-        if ($asStr && in_array($asStr, ['NOR','RED','INT','ISE'], true)) {
+        if ($asStr && in_array($asStr, ['NOR', 'RED', 'INT', 'ISE'], true)) {
             return $asStr;
         }
         // Converter percentagens comuns
@@ -57,8 +57,9 @@ class VendusService
     {
         $this->ensureProductsApiUrl();
 
-        Log::info("Payload JSON (create) para Vendus\nEndpoint: " . $this->productsApiUrl . "\n" .
-            json_encode($productData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        Log::info(
+            "Payload JSON (create) para Vendus\nEndpoint: " . $this->productsApiUrl . "\n" .
+                json_encode($productData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
         );
 
         Log::info('Tentativa envio produto (v1.2)', [
@@ -113,12 +114,16 @@ class VendusService
             return ['success' => false, 'message' => 'Resposta 2xx sem ID de produto.'];
         }
 
-        
+
 
         try {
             $contentType = $response->header('Content-Type') ?? '';
             $json = null;
-            try { $json = $response->json(); } catch (\Throwable $t) { $json = null; }
+            try {
+                $json = $response->json();
+            } catch (\Throwable $t) {
+                $json = null;
+            }
 
             if ($response->status() === 400 || $response->status() === 409) {
                 $errors = is_array($json) && isset($json['errors']) ? $json['errors'] : [];
@@ -128,7 +133,8 @@ class VendusService
                         $code = $error['code'] ?? '';
                         $msg = strtolower((string)($error['message'] ?? $error['detail'] ?? ''));
                         if ($code === 'A001' || str_contains($msg, 'refer') || str_contains($msg, 'já existe')) {
-                            $shouldUpdate = true; break;
+                            $shouldUpdate = true;
+                            break;
                         }
                     }
                 }
@@ -264,22 +270,34 @@ class VendusService
                 $json = $resp->json();
                 $items = [];
                 if (is_array($json)) {
-                    if (isset($json['data']) && is_array($json['data'])) { $items = $json['data']; }
-                    elseif (isset($json['variants']) && is_array($json['variants'])) { $items = $json['variants']; }
-                    else { $items = $json; }
+                    if (isset($json['data']) && is_array($json['data'])) {
+                        $items = $json['data'];
+                    } elseif (isset($json['variants']) && is_array($json['variants'])) {
+                        $items = $json['variants'];
+                    } else {
+                        $items = $json;
+                    }
                     $needle = $this->normalizeText($title);
                     $found = null;
                     foreach ($items as $item) {
                         $t = $this->normalizeText((string)($item['title'] ?? ''));
-                        if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                        if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) {
+                            $found = (int) $item['id'];
+                            break;
+                        }
                     }
                     if ($found === null) {
                         foreach ($items as $item) {
                             $t = $this->normalizeText((string)($item['title'] ?? ''));
-                            if ((str_contains($t, $needle) || str_contains($needle, $t)) && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                            if ((str_contains($t, $needle) || str_contains($needle, $t)) && isset($item['id']) && is_numeric($item['id'])) {
+                                $found = (int) $item['id'];
+                                break;
+                            }
                         }
                     }
-                    if ($found !== null) { return $found; }
+                    if ($found !== null) {
+                        return $found;
+                    }
                 }
             } else {
                 $resp2 = Http::withToken($this->apiKey)
@@ -290,22 +308,34 @@ class VendusService
                     $json2 = $resp2->json();
                     $items = [];
                     if (is_array($json2)) {
-                        if (isset($json2['data']) && is_array($json2['data'])) { $items = $json2['data']; }
-                        elseif (isset($json2['variants']) && is_array($json2['variants'])) { $items = $json2['variants']; }
-                        else { $items = $json2; }
+                        if (isset($json2['data']) && is_array($json2['data'])) {
+                            $items = $json2['data'];
+                        } elseif (isset($json2['variants']) && is_array($json2['variants'])) {
+                            $items = $json2['variants'];
+                        } else {
+                            $items = $json2;
+                        }
                         $needle = $this->normalizeText($title);
                         $found = null;
                         foreach ($items as $item) {
                             $t = $this->normalizeText((string)($item['title'] ?? ''));
-                            if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                            if ($t === $needle && isset($item['id']) && is_numeric($item['id'])) {
+                                $found = (int) $item['id'];
+                                break;
+                            }
                         }
                         if ($found === null) {
                             foreach ($items as $item) {
                                 $t = $this->normalizeText((string)($item['title'] ?? ''));
-                                if ((str_contains($t, $needle) || str_contains($needle, $t)) && isset($item['id']) && is_numeric($item['id'])) { $found = (int) $item['id']; break; }
+                                if ((str_contains($t, $needle) || str_contains($needle, $t)) && isset($item['id']) && is_numeric($item['id'])) {
+                                    $found = (int) $item['id'];
+                                    break;
+                                }
                             }
                         }
-                        if ($found !== null) { return $found; }
+                        if ($found !== null) {
+                            return $found;
+                        }
                     }
                 }
             }
@@ -330,9 +360,13 @@ class VendusService
                 $map = [];
                 $items = [];
                 if (is_array($json)) {
-                    if (isset($json['data']) && is_array($json['data'])) { $items = $json['data']; }
-                    elseif (isset($json['variants']) && is_array($json['variants'])) { $items = $json['variants']; }
-                    else { $items = $json; }
+                    if (isset($json['data']) && is_array($json['data'])) {
+                        $items = $json['data'];
+                    } elseif (isset($json['variants']) && is_array($json['variants'])) {
+                        $items = $json['variants'];
+                    } else {
+                        $items = $json;
+                    }
                     foreach ($items as $item) {
                         $text = (string) ($item['text'] ?? $item['title'] ?? '');
                         if ($text !== '' && isset($item['id']) && is_numeric($item['id'])) {
@@ -351,9 +385,13 @@ class VendusService
                     $map = [];
                     $items = [];
                     if (is_array($json2)) {
-                        if (isset($json2['data']) && is_array($json2['data'])) { $items = $json2['data']; }
-                        elseif (isset($json2['variants']) && is_array($json2['variants'])) { $items = $json2['variants']; }
-                        else { $items = $json2; }
+                        if (isset($json2['data']) && is_array($json2['data'])) {
+                            $items = $json2['data'];
+                        } elseif (isset($json2['variants']) && is_array($json2['variants'])) {
+                            $items = $json2['variants'];
+                        } else {
+                            $items = $json2;
+                        }
                         foreach ($items as $item) {
                             $text = (string) ($item['text'] ?? $item['title'] ?? '');
                             if ($text !== '' && isset($item['id']) && is_numeric($item['id'])) {
@@ -375,7 +413,9 @@ class VendusService
         $t = trim($text);
         $t = mb_strtolower($t, 'UTF-8');
         $t2 = @iconv('UTF-8', 'ASCII//TRANSLIT', $t);
-        if ($t2 !== false) { $t = $t2; }
+        if ($t2 !== false) {
+            $t = $t2;
+        }
         $t = preg_replace('/\s+/', ' ', $t);
         return $t;
     }
@@ -471,12 +511,14 @@ class VendusService
                 'price' => $priceVal
             ];
             if (isset($it['composite_id']) && is_numeric($it['composite_id'])) {
-                $pv['composite_ids'] = [ (string) $it['composite_id'] ];
+                $pv['composite_ids'] = [(string) $it['composite_id']];
             }
             $pvs[] = $pv;
         }
         $variant = ['title' => (string) $title];
-        if ($variantId !== null) { $variant['id'] = $variantId; }
+        if ($variantId !== null) {
+            $variant['id'] = $variantId;
+        }
         $variantBlock = [
             'variant' => $variant,
             'product_variants' => $pvs
@@ -559,7 +601,9 @@ class VendusService
                 $cid = $this->getVariantValueIdUnderParent($sizeSectionId, $text);
             }
             $itm = $it;
-            if ($cid !== null) { $itm['composite_id'] = $cid; }
+            if ($cid !== null) {
+                $itm['composite_id'] = $cid;
+            }
             $itemsWithComposite[] = $itm;
         }
 
@@ -585,7 +629,7 @@ class VendusService
         }
 
         $createResp = $this->sendProduct($payload);
-        
+
         if ($createResp['success']) {
             $createdId = $createResp['data']['id'] ?? null;
             if (is_numeric($createdId)) {
@@ -593,7 +637,9 @@ class VendusService
                 $data = $createResp['data'];
                 if ($sectionId !== null) {
                     $updVid = $this->updateProduct($pid, ['variant_id' => (string)$sectionId, 'class_id' => 'MOD']);
-                    if ($updVid['success']) { $data['variant_id'] = (string)$sectionId; }
+                    if ($updVid['success']) {
+                        $data['variant_id'] = (string)$sectionId;
+                    }
                 }
                 $this->attachVariantsToProduct($pid, $variantTitle, $itemsWithComposite, $sectionId);
                 return ['success' => true, 'data' => $data, 'action' => 'created'];
@@ -723,7 +769,6 @@ class VendusService
                 'data' => $body,
                 'message' => 'Fatura enviada com sucesso'
             ];
-
         } catch (Exception $e) {
             $this->logError(basename($filePath), 0, $e->getMessage(), '');
             return [
@@ -927,12 +972,15 @@ class VendusService
                                 'body' => $data,
                                 'raw_body' => substr((string)$lastResponseBody, 0, 2000),
                             ]);
-                        }
-                        else {
+                        } else {
                             // Falha HTTP – regista detalhes do erro para diagnóstico
                             $contentType = $resp2->header('Content-Type') ?? '';
                             $json = null;
-                            try { $json = $resp2->json(); } catch (\Throwable $t) { $json = null; }
+                            try {
+                                $json = $resp2->json();
+                            } catch (\Throwable $t) {
+                                $json = null;
+                            }
                             Log::error('Erro HTTP ao enviar fatura (ws v1.2)', [
                                 'endpoint' => $endpoint,
                                 'auth' => $useBearerLegacy ? 'Bearer' : 'Basic',
@@ -964,7 +1012,6 @@ class VendusService
                 'endpoint_used' => $lastEndpoint,
                 'auth_used' => $lastAttemptAuth,
             ];
-
         } catch (Exception $e) {
             $this->logError('invoice', 0, 'Exceção ao enviar fatura (JSON)', $e->getMessage());
             return [
@@ -1146,13 +1193,13 @@ class VendusService
             if (isset($data['id']) && is_numeric($data['id'])) {
                 return (int) $data['id'];
             }
-            
+
             foreach ($data as $item) {
                 if (is_array($item) && isset($item['id']) && is_numeric($item['id'])) {
                     return (int) $item['id'];
                 }
             }
-            
+
             foreach (['data', 'products', 'items'] as $key) {
                 if (isset($data[$key]) && is_array($data[$key])) {
                     foreach ($data[$key] as $item) {
@@ -1178,8 +1225,9 @@ class VendusService
             if (isset($payload['reference'])) {
                 unset($payload['reference']);
             }
-            Log::info("Payload JSON (update) para Vendus\nEndpoint: " . $url . "\n" .
-                json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+            Log::info(
+                "Payload JSON (update) para Vendus\nEndpoint: " . $url . "\n" .
+                    json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
             );
             $resp = Http::withToken($this->apiKey)
                 ->timeout(30)
@@ -1301,9 +1349,9 @@ class VendusService
         if (is_int($value)) return $value === 1;
         if (is_string($value)) {
             $v = strtolower(trim($value));
-            if ($v === '' ) return false;
-            $truthy = ['true','1','on','yes','sim'];
-            $falsy  = ['false','0','off','no','nao','não'];
+            if ($v === '') return false;
+            $truthy = ['true', '1', 'on', 'yes', 'sim'];
+            $falsy  = ['false', '0', 'off', 'no', 'nao', 'não'];
             if (in_array($v, $truthy, true)) return true;
             if (in_array($v, $falsy, true)) return false;
             // qualquer outra string não vazia: considerar verdadeiro?
@@ -1324,18 +1372,18 @@ class VendusService
     {
         // Obtém os mapeamentos ativos (campos Vendus com suas colunas Excel correspondentes)
         $mappings = FieldMapping::getMappedFields();
-        
+
         $payload = [];
-        
+
         foreach ($mappings as $mapping) {
             $vendusField = $mapping->vendus_field;
             $excelColumn = $mapping->excel_column;
             $fieldType = $mapping->field_type;
             $isRequired = $mapping->is_required;
             $defaultValue = $mapping->default_value;
-            
+
             $value = null;
-            
+
             // Primeiro, verifica se o campo Vendus existe diretamente nos dados
             if (isset($productData[$vendusField])) {
                 $value = $productData[$vendusField];
@@ -1350,12 +1398,12 @@ class VendusService
                     }
                 }
             }
-            
+
             // Se não encontrou o valor e tem valor padrão, usa o padrão
             if ($value === null && $defaultValue !== null) {
                 $value = $defaultValue;
             }
-            
+
             // Se é obrigatório e não tem valor, aplica lógica específica
             if ($isRequired && ($value === null || $value === '')) {
                 // Valores padrão específicos para campos obrigatórios
@@ -1381,7 +1429,7 @@ class VendusService
                         }
                 }
             }
-            
+
             // Aplica conversão de tipo se necessário
             if ($value !== null) {
                 if ($vendusField === 'reference') {
@@ -1400,13 +1448,13 @@ class VendusService
                             break;
                     }
                 }
-                
+
                 if ($vendusField !== 'supply_price' && $vendusField !== 'gross_price' && $vendusField !== 'price') {
                     $payload[$vendusField] = $value;
                 }
             }
         }
-        
+
         if (isset($payload['unit_id'])) {
             $payload['unit_id'] = (string) $payload['unit_id'];
         }
@@ -1512,16 +1560,34 @@ class VendusService
 
         // Whitelist de campos permitidos em v1.2 (observado via respostas da API)
         $allowed = [
-            'reference','barcode','supplier_code','title','description','include_description',
-            'unit_id','type_id','variant_id','class_id','prices','stock','tax','lot_control',
-            'category_id','brand_id','image','status','stores','variants','modifiers'
+            'reference',
+            'barcode',
+            'supplier_code',
+            'title',
+            'description',
+            'include_description',
+            'unit_id',
+            'type_id',
+            'variant_id',
+            'class_id',
+            'prices',
+            'stock',
+            'tax',
+            'lot_control',
+            'category_id',
+            'brand_id',
+            'image',
+            'status',
+            'stores',
+            'variants',
+            'modifiers'
         ];
         foreach (array_keys($payload) as $key) {
             if (!in_array($key, $allowed, true)) {
                 unset($payload[$key]);
             }
         }
-        
+
         return $payload;
     }
 
@@ -1581,7 +1647,7 @@ class VendusService
         ];
 
         Log::channel('single')->error('Vendus API Error', $logMessage);
-        
+
         $logFile = storage_path('logs/vendus_errors.log');
         file_put_contents($logFile, json_encode($logMessage) . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
@@ -1647,7 +1713,6 @@ class VendusService
                 'error' => 'Nenhum endpoint de unidades encontrado',
                 'message' => 'Não foi possível encontrar o endpoint correto para unidades. Verifique VENDUS_API_URL e versão da API.'
             ];
-
         } catch (Exception $e) {
             Log::error('Erro de conexão ao obter unidades', ['error' => $e->getMessage()]);
             return [
