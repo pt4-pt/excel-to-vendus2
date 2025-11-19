@@ -16,7 +16,6 @@ class VendusService
     private string $productsApiUrl;
     private string $documentsApiUrl;
     private string $apiUrl;
-    private static bool $firstPayloadLogged = false;
 
     public function __construct()
     {
