@@ -68,6 +68,8 @@ class VendusService
         ]);
         $response = Http::withHeaders([
             'Authorization' => 'Basic ' . base64_encode($this->apiKey . ':'),
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
         ])
             ->timeout(30)
             ->withOptions([
@@ -102,6 +104,10 @@ class VendusService
                     CURLOPT_SSL_VERIFYPEER => false,
                     CURLOPT_SSL_VERIFYHOST => false,
                 ]
+            ])
+            ->withHeaders([
+                'Content-Type' => 'application/json',
+                'Accept' => 'application/json',
             ])
             ->post($this->productsApiUrl, $productData);
 
@@ -255,6 +261,7 @@ class VendusService
         }
         $this->productsApiUrl = $this->ensureProductsEndpoint($this->productsApiUrl);
     }
+
 
     public function getVariantSectionIdByTitle(string $title): ?int
     {
@@ -496,14 +503,20 @@ class VendusService
         return array_values(array_unique(array_filter($endpoints)));
     }
 
-    private function buildVariantsPayload(string $title, array $items, bool $wrapped = true, ?int $variantId = null): array
+    private function buildVariantsPayload(string $title, array $items, bool $wrapped = true, ?int $variantId = null, ?string $fallbackGross = null): array
     {
         $pvs = [];
         foreach ($items as $it) {
             $text = isset($it['variante']) ? (string) $it['variante'] : (isset($it['size']) ? (string) $it['size'] : (string) ($it['variant'] ?? ($it['variant_text'] ?? ($it['text'] ?? ''))));
             $barcode = isset($it['upc_no']) ? (string) $it['upc_no'] : (string) ($it['barcode'] ?? '');
             $code = isset($it['code']) ? (string) $it['code'] : '';
-            $priceVal = '0.00';
+            $priceSrc = null;
+            if (isset($it['price'])) { $priceSrc = $it['price']; }
+            elseif (isset($it['gross_price'])) { $priceSrc = $it['gross_price']; }
+            $priceVal = $priceSrc !== null ? round((float) $priceSrc, 2) : 0.00;
+            if ((float)$priceVal === 0.00 && $fallbackGross !== null && $fallbackGross !== '') {
+                $priceVal = round((float) $fallbackGross, 2);
+            }
             $pv = [
                 'text' => $text,
                 'barcode' => $barcode,
@@ -571,9 +584,9 @@ class VendusService
         return ['success' => false, 'message' => $res['message'] ?? 'Falha ao criar produto', 'errors' => $res['errors'] ?? []];
     }
 
-    public function attachVariantsToProduct(int $productId, string $title, array $items, ?int $sectionId = null): array
+    public function attachVariantsToProduct(int $productId, string $title, array $items, ?int $sectionId = null, ?string $fallbackGross = null): array
     {
-        $payload = $this->buildVariantsPayload($title, $items, true, $sectionId);
+        $payload = $this->buildVariantsPayload($title, $items, true, $sectionId, $fallbackGross);
         if ($sectionId !== null) {
             $payload['variant_id'] = (string) $sectionId;
         }
@@ -608,10 +621,6 @@ class VendusService
         }
 
         $payload = $basePayload;
-        if ($sectionId !== null) {
-            $payload['variant_id'] = (string) $sectionId;
-        }
-        $payload['class_id'] = 'MOD';
         $stores = [];
         foreach ($itemsWithComposite as $it) {
             $valueId = isset($it['composite_id']) ? (string) $it['composite_id'] : '';
@@ -628,6 +637,18 @@ class VendusService
             $payload['stock'] = ['control' => '1', 'type' => 'M', 'stores' => $stores];
         }
 
+        Log::info(
+            "Payload JSON (create with variants) para Vendus\nEndpoint: " . $this->productsApiUrl . "\n" .
+            json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        );
+        $baseGross = null;
+        if (isset($payload['prices']) && is_array($payload['prices'])) {
+            if (isset($payload['prices']['gross'])) {
+                $baseGross = (string) number_format((float)$payload['prices']['gross'], 2, '.', '');
+            } elseif (isset($payload['prices']['groups']) && is_array($payload['prices']['groups']) && isset($payload['prices']['groups'][0]['gross'])) {
+                $baseGross = (string) number_format((float)$payload['prices']['groups'][0]['gross'], 2, '.', '');
+            }
+        }
         $createResp = $this->sendProduct($payload);
 
         if ($createResp['success']) {
@@ -641,7 +662,7 @@ class VendusService
                         $data['variant_id'] = (string)$sectionId;
                     }
                 }
-                $this->attachVariantsToProduct($pid, $variantTitle, $itemsWithComposite, $sectionId);
+                $this->attachVariantsToProduct($pid, $variantTitle, $itemsWithComposite, $sectionId, $baseGross);
                 return ['success' => true, 'data' => $data, 'action' => 'created'];
             }
             return ['success' => true, 'data' => $createResp['data'], 'action' => 'created'];
@@ -659,7 +680,7 @@ class VendusService
         $patchPayload['class_id'] = 'MOD';
         $update = $this->updateProduct($productId, $patchPayload);
         if ($update['success']) {
-            $this->attachVariantsToProduct($productId, $variantTitle, $itemsWithComposite, $sectionId);
+            $this->attachVariantsToProduct($productId, $variantTitle, $itemsWithComposite, $sectionId, $baseGross);
             $stores = [];
             foreach ($itemsWithComposite as $it) {
                 $valueId = isset($it['composite_id']) ? (string) $it['composite_id'] : '';
@@ -1415,6 +1436,10 @@ class VendusService
                     case 'status':
                         $value = 'on'; // Status ativo
                         break;
+                    case 'price_group_gross':
+                        $value = $productData['gross']
+                            ?? ($productData['gross_price'] ?? ($productData['price'] ?? ($productData['price_group_gross'] ?? null)));
+                        break;
                     default:
                         if ($defaultValue !== null) {
                             $value = $defaultValue;
@@ -1461,6 +1486,9 @@ class VendusService
         if (!isset($payload['status'])) {
             $payload['status'] = 'on';
         }
+        if (!isset($payload['type_id'])) {
+            $payload['type_id'] = 'P';
+        }
         // Inclui referência se veio dos dados, mesmo sem mapeamento ativo
         if (!isset($payload['reference']) && isset($productData['reference'])) {
             $payload['reference'] = (string) $productData['reference'];
@@ -1474,42 +1502,51 @@ class VendusService
             $payload['barcode'] = (string) $productData['barcode'];
         }
 
-        $pricesObj = [];
-        $supply = null;
-        if (isset($productData['supply']) || isset($productData['supply_price'])) {
-            $supply = isset($productData['supply']) ? $productData['supply'] : $productData['supply_price'];
-            $supply = number_format((float) $supply, 2, '.', '');
+        $pricesArr = [];
+        if (isset($productData['prices']) && is_array($productData['prices']) && !empty($productData['prices'])) {
+            $payload['prices'] = $productData['prices'];
+        } else {
+            $supply = null;
+            if (isset($productData['supply']) || isset($productData['supply_price'])) {
+                $supply = isset($productData['supply']) ? $productData['supply'] : $productData['supply_price'];
+                $supply = (string) number_format((float) $supply, 2, '.', '');
+            }
+            $gross = null;
+            if (isset($productData['gross'])) {
+                $gross = (string) number_format((float) $productData['gross'], 2, '.', '');
+            } elseif (isset($productData['gross_price'])) {
+                $gross = (string) number_format((float) $productData['gross_price'], 2, '.', '');
+            } elseif (isset($productData['price'])) {
+                $gross = (string) number_format((float) $productData['price'], 2, '.', '');
+            } elseif (isset($productData['price_group_gross'])) {
+                $gross = (string) number_format((float) $productData['price_group_gross'], 2, '.', '');
+            } elseif (isset($payload['price_group_gross'])) {
+                $gross = (string) number_format((float) $payload['price_group_gross'], 2, '.', '');
+            }
+            $entry = [];
+            $groupId = isset($productData['price_group_id']) ? $productData['price_group_id'] : ($payload['price_group_id'] ?? null);
+            if ($groupId !== null && $groupId !== '') { $entry['id'] = (string) $groupId; }
+            if ($gross !== null) { $entry['gross_price'] = $gross; }
+            if ($supply !== null) { $entry['supply_price'] = $supply; }
+            if (!empty($entry)) { $pricesArr[] = $entry; }
+            if (empty($pricesArr) && $gross !== null) {
+                $entry = ['gross_price' => $gross];
+                $pricesArr[] = $entry;
+            }
+            if (!empty($pricesArr)) { $payload['prices'] = $pricesArr; }
         }
-        $gross = null;
-        if (isset($productData['gross'])) {
-            $gross = number_format((float) $productData['gross'], 2, '.', '');
-        } elseif (isset($productData['gross_price'])) {
-            $gross = number_format((float) $productData['gross_price'], 2, '.', '');
-        } elseif (isset($productData['price'])) {
-            $gross = number_format((float) $productData['price'], 2, '.', '');
+        if (isset($payload['prices']) && is_array($payload['prices']) && isset($payload['prices'][0]) && is_array($payload['prices'][0])) {
+            $first = $payload['prices'][0];
+            $obj = [];
+            if (isset($first['gross_price'])) { $obj['gross'] = is_numeric($first['gross_price']) ? round((float)$first['gross_price'], 2) : round((float) str_replace(',', '.', $first['gross_price']), 2); }
+            if (isset($first['supply_price'])) { $obj['supply'] = is_numeric($first['supply_price']) ? round((float)$first['supply_price'], 2) : round((float) str_replace(',', '.', $first['supply_price']), 2); }
+            if (isset($first['id']) && $first['id'] !== '' && isset($obj['gross'])) { $obj['groups'] = [[ 'id' => (string)$first['id'], 'gross' => $obj['gross'] ]]; }
+            if (!empty($obj)) { $payload['prices'] = $obj; }
         }
-        if ($supply !== null) {
-            $pricesObj['supply'] = (string) $supply;
-        }
-        if ($gross !== null) {
-            $pricesObj['gross'] = (string) $gross;
-        }
-        $groupId = isset($productData['price_group_id']) ? $productData['price_group_id'] : null;
-        $groupGross = isset($productData['price_group_gross']) ? $productData['price_group_gross'] : null;
-        if ($groupId !== null && $groupId !== '' && $groupGross !== null && $groupGross !== '') {
-            $pricesObj['groups'] = [
-                [
-                    'id' => (string) $groupId,
-                    'gross' => (string) number_format((float) $groupGross, 2, '.', ''),
-                ]
-            ];
-        }
-        if (!empty($pricesObj)) {
-            $payload['prices'] = $pricesObj;
-        }
-        unset($payload['supply_price']);
-        unset($payload['gross_price']);
+        
         unset($payload['stock_type']);
+        unset($payload['price_group_gross']);
+        unset($payload['price_group_id']);
 
         // Converte possíveis campos antigos para os atuais
         $taxObj = [];
@@ -1571,6 +1608,8 @@ class VendusService
             'variant_id',
             'class_id',
             'prices',
+            'gross_price',
+            'supply_price',
             'stock',
             'tax',
             'lot_control',
@@ -1608,23 +1647,28 @@ class VendusService
             $errors[] = "Campo obrigatório 'unit_id' está vazio";
         }
 
-        if (isset($data['prices']) && is_array($data['prices'])) {
-            if (isset($data['prices']['gross']) && $data['prices']['gross'] !== '') {
-                $g = $data['prices']['gross'];
-                if (!is_numeric($g)) {
+        if (isset($data['prices'])) {
+            if (is_array($data['prices']) && isset($data['prices'][0]) && is_array($data['prices'][0])) {
+                foreach ($data['prices'] as $idx => $p) {
+                    if (isset($p['gross_price']) && $p['gross_price'] !== '' && !is_numeric($p['gross_price'])) {
+                        $errors[] = "prices[{$idx}].gross_price deve ser numérico";
+                    }
+                    if (isset($p['supply_price']) && $p['supply_price'] !== '' && !is_numeric($p['supply_price'])) {
+                        $errors[] = "prices[{$idx}].supply_price deve ser numérico";
+                    }
+                }
+            } elseif (is_array($data['prices'])) {
+                if (isset($data['prices']['gross']) && $data['prices']['gross'] !== '' && !is_numeric($data['prices']['gross'])) {
                     $errors[] = "prices.gross deve ser numérico";
                 }
-            }
-            if (isset($data['prices']['supply']) && $data['prices']['supply'] !== '') {
-                $s = $data['prices']['supply'];
-                if (!is_numeric($s)) {
+                if (isset($data['prices']['supply']) && $data['prices']['supply'] !== '' && !is_numeric($data['prices']['supply'])) {
                     $errors[] = "prices.supply deve ser numérico";
                 }
-            }
-            if (isset($data['prices']['groups']) && is_array($data['prices']['groups'])) {
-                foreach ($data['prices']['groups'] as $idx => $grp) {
-                    if (isset($grp['gross']) && $grp['gross'] !== '' && !is_numeric($grp['gross'])) {
-                        $errors[] = "prices.groups[{$idx}].gross deve ser numérico";
+                if (isset($data['prices']['groups']) && is_array($data['prices']['groups'])) {
+                    foreach ($data['prices']['groups'] as $idx => $grp) {
+                        if (isset($grp['gross']) && $grp['gross'] !== '' && !is_numeric($grp['gross'])) {
+                            $errors[] = "prices.groups[{$idx}].gross deve ser numérico";
+                        }
                     }
                 }
             }

@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Http\Services\VendusService;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class UploadController extends Controller
@@ -173,7 +174,9 @@ class UploadController extends Controller
 
                 // Constrói os dados do produto e o payload conforme v1.2
                 $productData = $this->buildProductData($productRows, $headerMap);
+                Log::info("Produto (Excel) mapeado\n" . json_encode($productData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
                 $payloadBase = $this->vendusService->buildProductPayload($productData);
+                Log::info("Payload JSON (base) para Vendus\n" . json_encode($payloadBase, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
                 
                 // Valida o payload (title, unit_id, prices, etc.)
                 $validation = $this->vendusService->validateProductData($payloadBase);
@@ -190,12 +193,10 @@ class UploadController extends Controller
                 $variantItems = $productData['variants'];
                 $variantCount = count($variantItems);
                 $basePrice = $variantCount > 0 ? (float) ($variantItems[0]['price'] ?? 0) : (float) 0;
-                if (!isset($payloadBase['prices'])) {
-                    $payloadBase['prices'] = [];
+                if (!isset($payloadBase['prices']) || !is_array($payloadBase['prices']) || !isset($payloadBase['prices']['gross'])) {
+                    $payloadBase['prices'] = [ 'gross' => round($basePrice, 2) ];
                 }
-                if (!isset($payloadBase['prices']['gross'])) {
-                    $payloadBase['prices']['gross'] = (string) number_format($basePrice, 2, '.', '');
-                }
+                Log::info("Payload JSON (base ajustado) para Vendus\n" . json_encode($payloadBase, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
                 $variantTitle = isset($productData['variant_title']) && $productData['variant_title'] !== '' ? (string) $productData['variant_title'] : 'Size';
                 $res = $this->vendusService->createProductWithVariants($payloadBase, $variantTitle, $variantItems);
                 if ($res['success']) {
@@ -602,6 +603,12 @@ class UploadController extends Controller
             'title' => trim((string)$firstRow[$headerMap['nome']]),
             'variants' => []
         ];
+        $productPrice = $this->parsePrice($firstRow[$headerMap['pvp']]);
+        if (is_numeric($productPrice)) { $productData['price'] = (float) $productPrice; }
+        if (isset($headerMap['cost'])) {
+            $costVal = $this->parsePrice($firstRow[$headerMap['cost']] ?? '');
+            if (is_numeric($costVal)) { $productData['supply_price'] = (float) $costVal; }
+        }
         if (isset($headerMap['tipo_variacao'])) {
             $vt = '';
             foreach ($productRows as $r) {
