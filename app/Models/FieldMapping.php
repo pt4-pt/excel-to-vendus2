@@ -220,6 +220,7 @@ class FieldMapping extends Model
                 'excel_column' => null,
                 'field_type' => 'string',
                 'is_required' => false,
+                'default_value' => true,
                 'description' => 'Usado para construir stock.control'
             ],
             [
