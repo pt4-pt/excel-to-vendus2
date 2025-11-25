@@ -7,6 +7,7 @@ use Illuminate\Support\Collection;
 
 class FieldMapping extends Model
 {
+
     private static array $ALLOWED_V12_FIELDS = [
         'title','reference','barcode','supplier_code','description','include_description',
         'unit_id','type_id','variant_id','class_id','prices','stock','tax','lot_control',
@@ -15,6 +16,7 @@ class FieldMapping extends Model
         'stock_control','stock_type','stock_store_id','product_variant_id','stock_stock','stock_stock_alert',
         'tax_id','tax_exemption','tax_exemption_law'
     ];
+
     protected $fillable = [
         'vendus_field',
         'vendus_field_label',
@@ -30,7 +32,6 @@ class FieldMapping extends Model
         'is_required' => 'boolean',
         'is_active' => 'boolean',
     ];
-
 
     /**
      * Obtém todos os mapeamentos ativos

@@ -262,7 +262,6 @@ class VendusService
         $this->productsApiUrl = $this->ensureProductsEndpoint($this->productsApiUrl);
     }
 
-
     public function getVariantSectionIdByTitle(string $title): ?int
     {
         $this->ensureProductsApiUrl();
@@ -710,6 +709,7 @@ class VendusService
         }
         return ['success' => false, 'message' => $update['message'] ?? 'Falha ao atualizar produto com variant_id', 'id' => $productId];
     }
+
     /**
      * Envia um documento (PDF) para a API de Documentos da Vendus
      * Tenta com Bearer Token e, em seguida, com Basic Auth.
@@ -1067,6 +1067,7 @@ class VendusService
             $this->documentsApiUrl = rtrim($this->documentsApiUrl, '/');
         }
     }
+
     private function getPossibleSalesDocumentsEndpoints(): array
     {
         $this->ensureDocumentsApiUrl();
