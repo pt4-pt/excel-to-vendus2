@@ -13,12 +13,16 @@ class FieldMappingController extends Controller
      */
     public function index()
     {
-        $mappings = FieldMapping::orderBy('vendus_field')->get();
+        $mappings = FieldMapping::orderCollectionByDefault(
+            FieldMapping::orderBy('vendus_field')->get()
+        );
         
         // Se não há mapeamentos, cria os padrão
         if ($mappings->isEmpty()) {
             FieldMapping::createDefaultMappings();
-            $mappings = FieldMapping::orderBy('vendus_field')->get();
+            $mappings = FieldMapping::orderCollectionByDefault(
+                FieldMapping::orderBy('vendus_field')->get()
+            );
         }
         
         return view('field-mappings.index', compact('mappings'));

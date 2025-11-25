@@ -621,6 +621,22 @@ class VendusService
         }
 
         $payload = $basePayload;
+        $baseGross = null;
+        if (isset($payload['prices']) && is_array($payload['prices'])) {
+            if (isset($payload['prices']['gross'])) {
+                $baseGross = (string) number_format((float)$payload['prices']['gross'], 2, '.', '');
+            } elseif (isset($payload['prices']['groups']) && is_array($payload['prices']['groups']) && isset($payload['prices']['groups'][0]['gross'])) {
+                $baseGross = (string) number_format((float)$payload['prices']['groups'][0]['gross'], 2, '.', '');
+            }
+        }
+        $variantsBlock = $this->buildVariantsPayload($variantTitle, $itemsWithComposite, true, $sectionId, $baseGross);
+        if (!empty($variantsBlock)) {
+            foreach ($variantsBlock as $k => $v) { $payload[$k] = $v; }
+        }
+        if ($sectionId !== null) {
+            $payload['variant_id'] = (string) $sectionId;
+        }
+        $payload['class_id'] = 'MOD';
         $stores = [];
         foreach ($itemsWithComposite as $it) {
             $valueId = isset($it['composite_id']) ? (string) $it['composite_id'] : '';
@@ -636,19 +652,10 @@ class VendusService
         if (!empty($stores)) {
             $payload['stock'] = ['control' => '1', 'type' => 'M', 'stores' => $stores];
         }
-
         Log::info(
             "Payload JSON (create with variants) para Vendus\nEndpoint: " . $this->productsApiUrl . "\n" .
             json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
         );
-        $baseGross = null;
-        if (isset($payload['prices']) && is_array($payload['prices'])) {
-            if (isset($payload['prices']['gross'])) {
-                $baseGross = (string) number_format((float)$payload['prices']['gross'], 2, '.', '');
-            } elseif (isset($payload['prices']['groups']) && is_array($payload['prices']['groups']) && isset($payload['prices']['groups'][0]['gross'])) {
-                $baseGross = (string) number_format((float)$payload['prices']['groups'][0]['gross'], 2, '.', '');
-            }
-        }
         $createResp = $this->sendProduct($payload);
 
         if ($createResp['success']) {
@@ -662,7 +669,6 @@ class VendusService
                         $data['variant_id'] = (string)$sectionId;
                     }
                 }
-                $this->attachVariantsToProduct($pid, $variantTitle, $itemsWithComposite, $sectionId, $baseGross);
                 return ['success' => true, 'data' => $data, 'action' => 'created'];
             }
             return ['success' => true, 'data' => $createResp['data'], 'action' => 'created'];
