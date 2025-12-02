@@ -15,6 +15,7 @@ class VendusService
     private string $apiKey;
     private string $productsApiUrl;
     private string $documentsApiUrl;
+    private string $suppliersApiUrl;
     private string $apiUrl;
 
     public function __construct()
@@ -22,6 +23,7 @@ class VendusService
         $this->apiKey = (string) env('VENDUS_API_KEY');
         $this->productsApiUrl = (string) env('VENDUS_PRODUCTS_API_URL');
         $this->documentsApiUrl = (string) env('VENDUS_DOCUMENTS_API_URL');
+        $this->suppliersApiUrl = (string) env('VENDUS_SUPPLIERS_API_URL');
         $this->apiUrl = (string) env('VENDUS_API_URL');
     }
 
@@ -260,6 +262,14 @@ class VendusService
             $this->productsApiUrl = rtrim($this->productsApiUrl, '/');
         }
         $this->productsApiUrl = $this->ensureProductsEndpoint($this->productsApiUrl);
+    }
+
+    private function ensureSuppliersApiUrl(): void
+    {
+        if (str_ends_with($this->suppliersApiUrl, '/')) {
+            $this->suppliersApiUrl = rtrim($this->suppliersApiUrl, '/');
+        }
+        $this->suppliersApiUrl = $this->ensureSuppliersEndpoint($this->suppliersApiUrl);
     }
 
     public function getVariantSectionIdByTitle(string $title): ?int
@@ -803,6 +813,137 @@ class VendusService
                 'status_code' => 0,
                 'error' => $e->getMessage(),
                 'message' => 'Erro de conexão ao enviar fatura'
+            ];
+        }
+    }
+
+    public function sendSupplier(array $supplier): array
+    {
+        $this->ensureSuppliersApiUrl();
+        $endpoint = $this->suppliersApiUrl;
+
+        Log::info(
+            "Payload JSON (supplier) para Vendus\nEndpoint: " . $endpoint . "\n" .
+            json_encode($supplier, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+        );
+
+        try {
+            $resp = Http::withBasicAuth($this->apiKey, '')
+                ->timeout(30)
+                ->withOptions([
+                    'verify' => false,
+                    'curl' => [
+                        CURLOPT_SSL_VERIFYPEER => false,
+                        CURLOPT_SSL_VERIFYHOST => false,
+                    ]
+                ])
+                ->withHeaders([
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ])
+                ->post($endpoint, $supplier);
+
+            if ($resp->successful()) {
+                return [
+                    'success' => true,
+                    'status_code' => $resp->status(),
+                    'data' => $resp->json(),
+                    'message' => 'Fornecedor criado com sucesso',
+                    'endpoint_used' => $endpoint,
+                    'auth_used' => 'Basic',
+                ];
+            }
+
+            $resp2 = Http::withToken($this->apiKey)
+                ->timeout(30)
+                ->withOptions([
+                    'verify' => false,
+                    'curl' => [
+                        CURLOPT_SSL_VERIFYPEER => false,
+                        CURLOPT_SSL_VERIFYHOST => false,
+                    ]
+                ])
+                ->withHeaders([
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ])
+                ->post($endpoint, $supplier);
+
+            if ($resp2->successful()) {
+                return [
+                    'success' => true,
+                    'status_code' => $resp2->status(),
+                    'data' => $resp2->json(),
+                    'message' => 'Fornecedor criado com sucesso',
+                    'endpoint_used' => $endpoint,
+                    'auth_used' => 'Bearer',
+                ];
+            }
+
+            $json = null;
+            try { $json = $resp->json(); } catch (\Throwable $t) { $json = null; }
+            $json2 = null;
+            try { $json2 = $resp2->json(); } catch (\Throwable $t) { $json2 = null; }
+
+            Log::error('Falha ao criar fornecedor', [
+                'status_basic' => $resp->status(),
+                'status_bearer' => $resp2->status(),
+                'errors_basic' => is_array($json) ? ($json['errors'] ?? null) : null,
+                'errors_bearer' => is_array($json2) ? ($json2['errors'] ?? null) : null,
+                'raw_body_basic' => substr((string)$resp->body(), 0, 1000),
+                'raw_body_bearer' => substr((string)$resp2->body(), 0, 1000),
+            ]);
+
+            return [
+                'success' => false,
+                'status_code' => $resp2->status() ?: $resp->status(),
+                'message' => 'Falha ao criar fornecedor',
+                'endpoint_used' => $endpoint,
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'status_code' => 0,
+                'message' => 'Erro de conexão ao criar fornecedor: ' . $e->getMessage(),
+            ];
+        }
+    }
+
+    public function sendSupplierFromInvoice(array $invoice): array
+    {
+        try {
+            if (empty($this->apiKey)) {
+                throw new Exception('VENDUS_API_KEY não configurada no .env');
+            }
+
+            $header = (array) ($invoice['header'] ?? []);
+
+            $supplier = [
+                'fiscal_id' => $header['customer_nif'] ?? null,
+                'name' => $header['customer_name'] ?? null,
+                'address' => $header['customer_address'] ?? null,
+                'postalcode' => $header['customer_postalcode'] ?? null,
+                'city' => $header['customer_city'] ?? null,
+                'phone' => $header['customer_phone'] ?? null,
+                'mobile' => $header['customer_mobile'] ?? null,
+                'email' => $header['customer_email'] ?? null,
+                'website' => $header['customer_website'] ?? null,
+                'country' => $header['customer_country'] ?? 'PT',
+            ];
+
+            $supplier = array_filter($supplier, function ($v) {
+                if ($v === null) return false;
+                if (is_string($v)) return $v !== '';
+                return true;
+            });
+
+            return $this->sendSupplier($supplier);
+        } catch (Exception $e) {
+            $this->logError('supplier', 0, 'Exceção ao criar fornecedor', $e->getMessage());
+            return [
+                'success' => false,
+                'status_code' => 0,
+                'message' => 'Erro ao criar fornecedor: ' . $e->getMessage(),
             ];
         }
     }
@@ -1368,6 +1509,19 @@ class VendusService
         // Loga correção automática de endpoint
         Log::warning('VENDUS_API_URL sem /products. Corrigindo automaticamente.', ['configured_url' => $url, 'final_url' => $clean . '/products']);
         return $clean . '/products';
+    }
+
+    private function ensureSuppliersEndpoint(string $url): string
+    {
+        $clean = rtrim(trim($url), '/');
+        if ($clean === '') {
+            return 'https://www.vendus.pt/ws/v1.2/suppliers';
+        }
+        if (preg_match('#/suppliers$#', $clean)) {
+            return $clean;
+        }
+        Log::warning('VENDUS_SUPPLIERS_API_URL sem /suppliers. Corrigindo automaticamente.', ['configured_url' => $url, 'final_url' => $clean . '/suppliers']);
+        return $clean . '/suppliers';
     }
 
     private function normalizeBoolean($value): bool

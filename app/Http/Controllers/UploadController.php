@@ -83,11 +83,11 @@ class UploadController extends Controller
                     if (!isset($invoiceData['header'])) { $invoiceData['header'] = []; }
                     $invoiceData['header']['external_reference'] = (string) $key;
 
-                    $apiResult = $this->vendusService->sendInvoice($invoiceData);
+                    $apiResult = $this->vendusService->sendSupplierFromInvoice($invoiceData);
                     if ($apiResult['success'] ?? false) {
                         $results[] = [
                             'type' => 'success',
-                            'message' => 'Fatura enviada com sucesso',
+                            'message' => 'Fornecedor criado com sucesso',
                             'reference' => (string) $key,
                             'status_code' => $apiResult['status_code'] ?? 200,
                             'endpoint' => $apiResult['endpoint_used'] ?? null,
@@ -96,7 +96,7 @@ class UploadController extends Controller
                     } else {
                         $results[] = [
                             'type' => 'error',
-                            'message' => $apiResult['message'] ?? 'Falha ao enviar fatura',
+                            'message' => $apiResult['message'] ?? 'Falha ao criar fornecedor',
                             'reference' => (string) $key,
                             'status_code' => $apiResult['status_code'] ?? 400,
                             'endpoint' => $apiResult['endpoint_used'] ?? null,
@@ -107,7 +107,7 @@ class UploadController extends Controller
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Processamento de faturas concluído',
+                    'message' => 'Processamento de fornecedores concluído',
                     'total_invoices' => $totalInvoices,
                     'results' => $results
                 ]);
